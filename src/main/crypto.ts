@@ -127,7 +127,7 @@ export function decrypt(
  * 与 Math.random() 不同，crypto.randomBytes() 是密码学安全的。
  *
  * 生成策略：
- *   1. 从选定的字符池中均匀随机选取字符
+ *   1. 拒绝采样（rejection sampling）从字符集中均匀随机选取字符，消除取模偏差
  *   2. 确保每种选定的字符类型至少出现一次（例如至少一个大写字母）
  *   3. 用保证存在的字符替换密码前 N 位，其余位置保持随机
  *
@@ -167,23 +167,34 @@ export function generatePassword(options: {
   // 合并所有字符池为一个完整字符集
   const charset = pools.join('')
 
-  // 生成足够的随机字节（length * 2 确保取模后分布均匀）
-  const bytes = crypto.randomBytes(length * 2)
-  let password = ''
-
-  // 从字符集中均匀选取字符
-  for (let i = 0; i < length; i++) {
-    password += charset[bytes[i] % charset.length]
+  // 拒绝采样（rejection sampling）：只接受小于 limit 的随机字节，
+  // 消除 `% charset.length` 的取模偏差，保证每个字符等概率出现。
+  // 使用随机字节池 + 游标，避免逐字符调用 crypto.randomBytes。
+  let bytes = crypto.randomBytes(256)
+  let pos = 0
+  const randomChar = (cs: string): string => {
+    const limit = Math.floor(256 / cs.length) * cs.length
+    let b = 0
+    do {
+      if (pos >= bytes.length) {
+        bytes = crypto.randomBytes(256)
+        pos = 0
+      }
+      b = bytes[pos++]
+    } while (b >= limit)
+    return cs[b % cs.length]
   }
 
-  // 确保每种选定的字符类型至少出现一次
-  // 从每个池中各取一个字符作为"保证存在"字符
-  const required: string[] = []
-  for (const pool of pools) {
-    required.push(pool[bytes[length + required.length] % pool.length])
+  // 先保证每种选定的字符类型至少出现一次（"保证存在"字符）
+  const required = pools.map((pool) => randomChar(pool))
+
+  // 长度不能小于字符类型数，否则无法容纳所有"保证存在"字符
+  const safeLength = Math.max(length, required.length)
+  let password = ''
+  for (let i = 0; i < safeLength; i++) {
+    password += randomChar(charset)
   }
 
   // 用保证存在的字符替换密码前 N 位，确保密码策略合规
-  const result = required.join('') + password.slice(required.length)
-  return result
+  return required.join('') + password.slice(required.length)
 }

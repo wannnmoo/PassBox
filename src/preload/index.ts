@@ -20,6 +20,7 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron'
+import type { PasswordEntry, NewPasswordEntry, PasswordOptions } from '../shared/types'
 
 /**
  * 通过 contextBridge 暴露到渲染进程的 API 对象
@@ -53,13 +54,14 @@ const api = {
   },
   entries: {
     /** 列出所有条目（密码已掩码） */
-    list: (): Promise<Entry[]> => ipcRenderer.invoke('entries:list'),
+    list: (): Promise<PasswordEntry[]> => ipcRenderer.invoke('entries:list'),
     /** 获取单个条目（含明文密码） */
-    get: (id: string): Promise<Entry | null> => ipcRenderer.invoke('entries:get', id),
+    get: (id: string): Promise<PasswordEntry | null> => ipcRenderer.invoke('entries:get', id),
     /** 创建新条目 */
-    create: (entry: NewEntry): Promise<Entry> => ipcRenderer.invoke('entries:create', entry),
+    create: (entry: NewPasswordEntry): Promise<PasswordEntry> =>
+      ipcRenderer.invoke('entries:create', entry),
     /** 更新条目（支持部分更新） */
-    update: (id: string, updates: Partial<Entry>): Promise<Entry | null> =>
+    update: (id: string, updates: Partial<PasswordEntry>): Promise<PasswordEntry | null> =>
       ipcRenderer.invoke('entries:update', id, updates),
     /** 删除条目（不可撤销） */
     delete: (id: string): Promise<boolean> => ipcRenderer.invoke('entries:delete', id),
@@ -70,6 +72,8 @@ const api = {
   password: {
     /** 复制条目密码到剪贴板（30 秒后自动清除） */
     copy: (id: string): Promise<void> => ipcRenderer.invoke('password:copy', id),
+    /** 复制任意文本到剪贴板（30 秒后自动清除），如生成器生成的密码 */
+    copyText: (text: string): Promise<void> => ipcRenderer.invoke('password:copy-text', text),
     /** 手动清除剪贴板 */
     clearClipboard: (): Promise<void> => ipcRenderer.invoke('password:clear-clipboard'),
     /** 生成随机密码（密码学安全） */
@@ -82,37 +86,7 @@ const api = {
 contextBridge.exposeInMainWorld('api', api)
 
 // ═══════════════════════════════════════════════════
-// 类型定义（与主进程 vault.ts 保持同步）
-// 此处定义供预加载脚本内部使用，env.d.ts 声明全局类型
+// 类型说明
+// 条目/密码相关类型统一从 src/shared/types.ts 导入，
+// 与主进程 vault.ts、渲染进程 types.ts 共享同一份定义。
 // ═══════════════════════════════════════════════════
-
-/** 密码条目 */
-interface Entry {
-  id: string            // 唯一标识符（UUID v4）
-  service: string       // 服务名称
-  username: string      // 用户名/邮箱
-  password: string      // 明文密码
-  url?: string          // 关联网址（可选）
-  notes?: string        // 备注（可选）
-  order: number         // 排序序号
-  createdAt: number     // 创建时间戳
-  updatedAt: number     // 更新时间戳
-}
-
-/** 新条目输入（不含自动生成的字段） */
-interface NewEntry {
-  service: string
-  username: string
-  password: string
-  url?: string
-  notes?: string
-}
-
-/** 密码生成选项 */
-interface PasswordOptions {
-  length?: number       // 密码长度（默认 20）
-  uppercase?: boolean   // 包含大写字母（默认 true）
-  lowercase?: boolean   // 包含小写字母（默认 true）
-  numbers?: boolean     // 包含数字（默认 true）
-  symbols?: boolean     // 包含符号（默认 true）
-}

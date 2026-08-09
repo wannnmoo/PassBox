@@ -68,6 +68,8 @@ export const entries = {
 export const password = {
   /** 复制条目密码到剪贴板（30 秒后自动清除） */
   copy: (id: string): Promise<void> => api.password.copy(id),
+  /** 复制任意文本到剪贴板（30 秒后自动清除），如生成器生成的密码 */
+  copyText: (text: string): Promise<void> => api.password.copyText(text),
   /** 手动清除剪贴板 */
   clearClipboard: (): Promise<void> => api.password.clearClipboard(),
   /** 生成密码学安全的随机密码 */

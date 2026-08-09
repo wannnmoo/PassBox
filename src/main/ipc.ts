@@ -129,6 +129,11 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  /** 复制任意文本到剪贴板（30 秒后自动清除）→ 密码生成器等场景 */
+  ipcMain.handle('password:copy-text', (_event, text: string) => {
+    copyToClipboard(text)
+  })
+
   /** 手动清除剪贴板 → 取消定时器并清空内容 */
   ipcMain.handle('password:clear-clipboard', () => {
     clearClipboard()

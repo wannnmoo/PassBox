@@ -17,7 +17,12 @@ npm run dist         # 完整发布流程：生成图标 → 构建 → electron
 npm run icon         # 单独生成图标（scripts/make-icon.js → resources/icon.png + icon.ico）
 ```
 
-项目没有测试框架或 lint 配置。
+项目没有测试框架或 lint 配置，也没有 typecheck 脚本。
+
+⚠️ **`npm run build` 不做类型检查**（electron-vite 用 Vite/esbuild 仅转译，不执行 `tsc`），构建通过不代表类型正确。需要类型检查时手动运行：
+`npx tsc --noEmit -p tsconfig.node.json --composite false`（主进程 + preload）
+`npx tsc --noEmit -p tsconfig.web.json --composite false`（渲染进程）
+（两个 tsconfig 均设置了 `composite: true`，需用 `--composite false` 覆盖才能配合 `--noEmit`）
 
 ### 构建产物目录
 
@@ -35,7 +40,7 @@ npm run icon         # 单独生成图标（scripts/make-icon.js → resources/i
 - **状态管理**：无外部库，仅使用 React 内置的 `useState` / `useContext` / `useRef`
 - **组件优化**：`VaultScreen` 和 `EntryList` 使用 `React.memo()` 避免不必要重渲染
 - **拖拽排序**：使用原生 HTML5 Drag and Drop API（`draggable` 属性 + `dragStart` / `dragOver` / `drop` 事件），未引入第三方拖拽库
-- **主题初始化**：`getInitialTheme()` 始终返回 `'light'`，不从 `localStorage` 恢复上次主题选择，应用重启时总是亮色主题
+- **主题初始化**：`getInitialTheme()` 从 `localStorage('theme')` 恢复上次主题选择，无记录时默认 `'light'`。主题在渲染阶段通过 `applyTheme()` 同步到 DOM 与 localStorage（无 useEffect，确保首次渲染前生效、避免闪烁）
 
 ### 开发注意事项
 
@@ -83,7 +88,8 @@ VaultScreen 中通过 `keydown` 事件监听实现的全局快捷键：
 │ React 18 单页应用，通过 window.api 调用主进程            │
 │                                                         │
 │ api.ts     window.api 的类型化封装                       │
-│ types.ts   共享类型定义                                  │
+│ types.ts   从 shared/types 再导出的共享类型              │
+│ env.d.ts   Window.api 全局类型声明（也引用 shared/types）│
 │ App.tsx    根组件：主题切换 + 解锁/锁定状态切换          │
 │                                                         │
 │ 组件树：                                                 │
@@ -107,16 +113,16 @@ VaultScreen 中通过 `keydown` 事件监听实现的全局快捷键：
 
 ### 数据流
 
-1. **保险库生命周期**：首次使用 → 创建保险库（`createVault`，生成随机 salt → 派生密钥 → 加密空条目列表 → 写入 vault.dat）。后续使用 → 解锁（`unlockVault`，读取文件 → 用 salt 派生密钥 → 尝试解密验证密码正确性 → 将条目加载到内存）
+1. **保险库生命周期**：首次使用 → 创建保险库（`createVault`，生成随机 salt → 派生密钥 → 加密空条目列表 → 写入 vault.dat）。后续使用 → 解锁（`unlockVault`，读取文件 → 用 salt 派生密钥 → 尝试解密验证密码正确性 → 将条目加载到内存）。解锁时会做向后兼容迁移：为缺失 `order` 字段的旧版本条目按数组索引补齐
 
 2. **条目 CRUD**：所有变更先更新内存中的 `state.entries`，然后立即调用 `saveVault()` 全量重新加密写入文件。每次保存生成新的随机 IV。
 
-3. **密码安全**：`listEntries` 返回时密码被替换为 `••••••••`，只有 `getEntry` 返回完整密码。复制密码使用 Electron 的 `clipboard.writeText`，30 秒后自动清除。
+3. **密码安全**：`listEntries` 返回时密码被替换为 `••••••••`，只有 `getEntry` 返回完整密码。复制密码统一走主进程剪贴板模块（`copyToClipboard`），30 秒后自动清除：条目详情通过 `password:copy`，PasswordGenerator 通过 `password:copy-text`，两处行为一致。
 
 4. **IPC 通道**（全部为 `ipcMain.handle` / `ipcRenderer.invoke` 模式）：
    - `vault:exists` / `vault:create` / `vault:unlock` / `vault:lock` / `vault:change-password` / `vault:status`
    - `entries:list` / `entries:get` / `entries:create` / `entries:update` / `entries:delete` / `entries:reorder`
-   - `password:copy` / `password:clear-clipboard` / `password:generate`
+   - `password:copy` / `password:copy-text` / `password:clear-clipboard` / `password:generate`
 
 ### ViewMode 状态机与 Esc 退出层级
 
@@ -148,6 +154,16 @@ VaultScreen 中的闲置监控机制，细节对维护很重要：
 - **存储格式**（vault.dat）：JSON `{ salt, iv, authTag, ciphertext }`，全部为 hex 字符串
 - **修改主密码**：验证旧密码 → 生成新 salt → 重新加密 → 覆盖 vault.dat
 
+### 类型定义（共享）
+
+**所有跨进程类型统一在 [shared/types.ts](src/shared/types.ts) 定义一次**（`PasswordEntry` / `NewPasswordEntry` / `PasswordOptions` / `VaultStatus`），主进程 [vault.ts](src/main/vault.ts)、preload [index.ts](src/preload/index.ts)、渲染进程 [types.ts](src/renderer/src/types.ts) 与 [env.d.ts](src/renderer/src/env.d.ts) 均从该文件导入（types.ts 仅做 re-export，env.d.ts 在 `declare global` 中引用）。contextBridge 在编译期不共享类型，但类型形状由主进程 vault.ts 的序列化决定——改字段时只需改 shared/types.ts 一处。
+
+### 安全实现细节
+
+- `writeVault()` 采用**原子写入**（先写 `vault.dat.tmp` 再 `rename` 覆盖），写入中断不会损坏 vault.dat
+- `lockVault()` 对 key Buffer 做显式清零（`fill(0)`）后置 null，修改主密码时也会清零旧密钥，防止密钥残留在内存中
+- `generatePassword()` 使用**拒绝采样**（rejection sampling）消除 `% charset.length` 的取模偏差，保证每个字符等概率出现，且长度小于选中字符类型数时自动取类型数
+
 ### 文件存储路径
 
 - **生产模式**（`app.isPackaged`）：`vault.dat` 在 exe 同级目录（便携模式）
@@ -170,4 +186,4 @@ VaultScreen 中的闲置监控机制，细节对维护很重要：
 
 ### UI 主题
 
-支持暗色/亮色主题切换，通过 CSS 自定义属性实现。主题选择存储在 `localStorage('theme')`，通过 `<html data-theme="...">` 属性驱动样式。**默认主题为亮色**（`getInitialTheme()` 返回 `'light'`）。暗色主题使用 Matrix Green (`#00c853`) 配色，亮色主题使用相应调整后的绿色 (`#00a844`)。
+支持暗色/亮色主题切换，通过 CSS 自定义属性实现。主题选择存储在 `localStorage('theme')`，通过 `<html data-theme="...">` 属性驱动样式，重启后恢复上次选择；无记录时默认亮色（`getInitialTheme()` 从 localStorage 读取，兜底返回 `'light'`）。暗色主题使用 Matrix Green (`#00c853`) 配色，亮色主题使用相应调整后的绿色 (`#00a844`)。

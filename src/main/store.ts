@@ -63,16 +63,18 @@ export function readVault(): string {
 /**
  * 写入保险库文件
  *
- * 将加密后的 JSON 数据写入 vault.dat。
- * 每次调用会完整覆盖文件内容（非追加模式）。
- *
- * 注意：当前实现是直接覆盖写入。理想情况下应使用原子写入：
- *   先写临时文件 → fsync → 重命名为正式文件，以防写入过程中断电导致文件损坏。
+ * 将加密后的 JSON 数据写入 vault.dat，采用原子写入：
+ *   先写临时文件，再重命名为正式文件，避免写入过程中断导致 vault.dat 损坏
+ *   （直接覆盖写入时，进程崩溃/断电可能留下截断的坏文件）。
+ * rename 在 Windows 上会覆盖已存在的目标文件。
  *
  * @param data - 要写入的字符串（加密后的 JSON）
  */
 export function writeVault(data: string): void {
-  fs.writeFileSync(vaultPath(), data, 'utf8')
+  const file = vaultPath()
+  const tmp = file + '.tmp'
+  fs.writeFileSync(tmp, data, 'utf8')
+  fs.renameSync(tmp, file)
 }
 
 /**

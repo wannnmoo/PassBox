@@ -61,10 +61,10 @@ export default memo(function PasswordGenerator({ onUse, onClose }: Props): JSX.E
     setGenerated(pw)
   }, [length, uppercase, lowercase, numbers, symbols])
 
-  /** 复制密码到系统剪贴板 */
+  /** 复制密码到系统剪贴板（走主进程 clipboard，30 秒后自动清除，与条目详情行为一致） */
   const handleCopy = useCallback(async () => {
     if (!generated) return
-    await navigator.clipboard.writeText(generated)
+    await passwordApi.copyText(generated)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)  // 2 秒后恢复图标
   }, [generated])

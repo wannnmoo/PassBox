@@ -17,22 +17,7 @@
 import crypto from 'crypto'
 import { deriveKey, encrypt, decrypt } from './crypto'
 import { vaultExists, readVault, writeVault } from './store'
-
-/**
- * 密码条目接口
- * 每个条目代表用户保存的一条密码记录（如网站登录信息）
- */
-export interface PasswordEntry {
-  id: string           // 唯一标识，使用 crypto.randomUUID() 生成
-  service: string      // 服务名称，例如 "Google", "GitHub"
-  username: string     // 用户名或邮箱
-  password: string     // 明文密码（仅在内存中存储，写入文件前会加密）
-  url?: string         // 可选：关联网址
-  notes?: string       // 可选：备注信息
-  order: number        // 排序序号，用于拖拽排序
-  createdAt: number    // 创建时间戳（毫秒）
-  updatedAt: number    // 最后更新时间戳（毫秒）
-}
+import type { PasswordEntry } from '../shared/types'
 
 /** 保险库文件的存储格式（保存在 vault.dat 中，全部为 hex 字符串） */
 interface VaultData {
@@ -46,6 +31,7 @@ interface VaultData {
 interface VaultState {
   isUnlocked: boolean  // 是否已解锁
   key: Buffer | null   // 派生密钥（256-bit），锁定后置为 null
+  salt: string | null  // 当前保险库的 salt（hex），saveVault 时复用，避免每次重读文件
   entries: PasswordEntry[]  // 内存中的解密条目列表
 }
 
@@ -53,6 +39,7 @@ interface VaultState {
 const state: VaultState = {
   isUnlocked: false,
   key: null,
+  salt: null,
   entries: []
 }
 
@@ -86,6 +73,7 @@ export function createVault(masterPassword: string): void {
   // 创建后立即解锁，用户无需再次输入密码
   state.isUnlocked = true
   state.key = key
+  state.salt = salt.toString('hex')
   state.entries = entries
 }
 
@@ -124,6 +112,7 @@ export function unlockVault(masterPassword: string): boolean {
 
     state.isUnlocked = true
     state.key = key
+    state.salt = vaultData.salt
     state.entries = entries
     return true
   } catch {
@@ -148,7 +137,7 @@ export function unlockVault(masterPassword: string): boolean {
  * @throws 如果保险库未解锁，抛出 Error
  */
 export function changeMasterPassword(oldPassword: string, newPassword: string): boolean {
-  if (!state.isUnlocked) throw new Error('Vault is locked')
+  assertUnlocked()
 
   try {
     const raw = readVault()
@@ -174,8 +163,10 @@ export function changeMasterPassword(oldPassword: string, newPassword: string): 
       ciphertext
     }))
 
-    // 更新内存中的密钥
+    // 更新内存中的密钥和 salt（先清零旧密钥缓冲区）
+    state.key?.fill(0)
     state.key = newKey
+    state.salt = newSalt.toString('hex')
     return true
   } catch {
     return false
@@ -185,11 +176,11 @@ export function changeMasterPassword(oldPassword: string, newPassword: string): 
 /**
  * 锁定保险库
  *
- * 清空内存中所有解密后的数据：密钥置 null，条目列表置空数组。
+ * 清空内存中所有解密后的数据：密钥缓冲区显式清零并置 null，条目列表置空数组。
  * 锁定后只有重新输入正确的主密码才能访问数据。
- * 注意：调用前应考虑对 key Buffer 做显式清零（fill(0)）以防止密钥残留在内存中。
  */
 export function lockVault(): void {
+  state.key?.fill(0)  // 显式清零密钥缓冲区，防止密钥残留在内存中
   state.isUnlocked = false
   state.key = null
   state.entries = []
@@ -204,22 +195,20 @@ export function lockVault(): void {
  * @throws 如果保险库未解锁或 key 为 null，抛出 Error
  */
 function saveVault(): void {
-  if (!state.isUnlocked || !state.key) {
+  if (!state.isUnlocked || !state.key || !state.salt) {
     throw new Error('Vault is not unlocked')
   }
-
-  const raw = readVault()
-  const vaultData: VaultData = JSON.parse(raw)
 
   const plaintext = JSON.stringify(state.entries)
   const { iv, ciphertext, authTag } = encrypt(plaintext, state.key)
 
-  // 只更新变化的部分（iv、authTag、ciphertext），salt 保持不变
-  vaultData.iv = iv
-  vaultData.authTag = authTag
-  vaultData.ciphertext = ciphertext
+  // salt 缓存在 state 中（创建/解锁/改密码时更新），无需每次重读文件
+  writeVault(JSON.stringify({ salt: state.salt, iv, authTag, ciphertext }))
+}
 
-  writeVault(JSON.stringify(vaultData))
+/** 保险库未解锁时抛出异常，所有 CRUD 操作入口调用 */
+function assertUnlocked(): void {
+  if (!state.isUnlocked) throw new Error('Vault is not unlocked')
 }
 
 /**
@@ -248,7 +237,7 @@ export function hasVault(): boolean {
  * @throws 如果保险库未解锁，抛出 Error
  */
 export function listEntries(): PasswordEntry[] {
-  if (!state.isUnlocked) throw new Error('Vault is locked')
+  assertUnlocked()
   return [...state.entries]
     .sort((a, b) => a.order - b.order)  // 按 order 升序排列
     .map((e) => ({
@@ -265,7 +254,7 @@ export function listEntries(): PasswordEntry[] {
  * @throws 如果保险库未解锁，抛出 Error
  */
 export function getEntry(id: string): PasswordEntry | undefined {
-  if (!state.isUnlocked) throw new Error('Vault is locked')
+  assertUnlocked()
   return state.entries.find((e) => e.id === id)
 }
 
@@ -279,7 +268,7 @@ export function getEntry(id: string): PasswordEntry | undefined {
  * @throws 如果保险库未解锁，抛出 Error
  */
 export function createEntry(entry: Omit<PasswordEntry, 'id' | 'order' | 'createdAt' | 'updatedAt'>): PasswordEntry {
-  if (!state.isUnlocked) throw new Error('Vault is locked')
+  assertUnlocked()
 
   const now = Date.now()
   const newEntry: PasswordEntry = {
@@ -309,18 +298,19 @@ export function updateEntry(
   id: string,
   updates: Partial<Omit<PasswordEntry, 'id' | 'createdAt'>>
 ): PasswordEntry | undefined {
-  if (!state.isUnlocked) throw new Error('Vault is locked')
+  assertUnlocked()
 
   const index = state.entries.findIndex((e) => e.id === id)
   if (index === -1) return undefined
 
+  const entry = state.entries[index]
   // 合并更新内容，保护 id 和 createdAt 不被覆盖
   state.entries[index] = {
-    ...state.entries[index],
+    ...entry,
     ...updates,
-    id: state.entries[index].id,                          // 保持原 ID
-    createdAt: state.entries[index].createdAt,            // 保持原创建时间
-    updatedAt: Date.now()                                 // 更新修改时间
+    id: entry.id,                       // 保持原 ID
+    createdAt: entry.createdAt,         // 保持原创建时间
+    updatedAt: Date.now()               // 更新修改时间
   }
 
   saveVault()
@@ -337,14 +327,13 @@ export function updateEntry(
  * @throws 如果保险库未解锁，抛出 Error
  */
 export function reorderEntries(orderedIds: string[]): void {
-  if (!state.isUnlocked) throw new Error('Vault is locked')
+  assertUnlocked()
 
-  // 遍历 ID 数组，将索引位置赋值给对应条目的 order 字段
-  orderedIds.forEach((id, index) => {
-    const entry = state.entries.find((e) => e.id === id)
-    if (entry) {
-      entry.order = index
-    }
+  // 将 ID → 新索引建 Map，一次遍历批量更新 order（避免逐条 find 的 O(n²)）
+  const orderMap = new Map(orderedIds.map((id, index) => [id, index]))
+  state.entries.forEach((entry) => {
+    const order = orderMap.get(entry.id)
+    if (order !== undefined) entry.order = order
   })
 
   saveVault()
@@ -361,7 +350,7 @@ export function reorderEntries(orderedIds: string[]): void {
  * @throws 如果保险库未解锁，抛出 Error
  */
 export function deleteEntry(id: string): boolean {
-  if (!state.isUnlocked) throw new Error('Vault is locked')
+  assertUnlocked()
 
   const index = state.entries.findIndex((e) => e.id === id)
   if (index === -1) return false

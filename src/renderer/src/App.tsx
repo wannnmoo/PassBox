@@ -31,10 +31,11 @@ type Theme = 'dark' | 'light'
  * 从 localStorage 获取初始主题设置
  *
  * 首次使用时默认返回 'light'（亮色主题），
- * 之后读取用户之前设置的主题偏好。
+ * 之后读取用户之前设置的主题偏好并恢复。
  */
 function getInitialTheme(): Theme {
-  return 'light'
+  const stored = localStorage.getItem('theme')
+  return stored === 'dark' || stored === 'light' ? stored : 'light'
 }
 
 /**
@@ -60,21 +61,15 @@ export default function App(): JSX.Element {
   const [unlocked, setUnlocked] = useState(false)
 
   // 在渲染阶段同步应用主题（确保主题在首次渲染前就已生效）
-  if (typeof document !== 'undefined') {
-    applyTheme(theme)
-  }
+  applyTheme(theme)
 
   // 解锁/锁定回调 — 使用 useCallback 避免子组件不必要的重渲染
   const handleUnlocked = useCallback(() => setUnlocked(true), [])
   const handleLocked = useCallback(() => setUnlocked(false), [])
 
-  // 切换主题 — 函数式更新确保基于最新状态
+  // 切换主题 — 只更新状态，DOM 与 localStorage 的同步由渲染阶段的 applyTheme 完成
   const toggleTheme = useCallback(() => {
-    setTheme((prev) => {
-      const next: Theme = prev === 'dark' ? 'light' : 'dark'
-      applyTheme(next)
-      return next
-    })
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
   }, [])
 
   // ── 未解锁状态：显示解锁界面 ──────────────────────

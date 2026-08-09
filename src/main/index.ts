@@ -164,7 +164,13 @@ app.whenReady().then(() => {
   })
 
   // 加载渲染进程页面（React 应用）
-  win.loadFile(join(__dirname, '../renderer/index.html'))
+  // 开发模式（npm run dev）：electron-vite 注入 ELECTRON_RENDERER_URL（Vite dev server 地址），
+  // 必须加载该 URL 才能获得 HMR；否则加载构建产物 out/renderer/index.html
+  if (process.env['ELECTRON_RENDERER_URL']) {
+    win.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  } else {
+    win.loadFile(join(__dirname, '../renderer/index.html'))
+  }
 
   // 页面渲染就绪后再显示窗口，避免白屏/黑屏闪烁
   // 配合 show: false + backgroundColor + HTML 内联背景，三层防护
