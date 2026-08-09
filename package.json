@@ -9,8 +9,8 @@
     "build": "electron-vite build",
     "start": "electron .",
     "icon": "node scripts/make-icon.js",
-    "pack": "npm run icon && electron-vite build && electron-builder --dir && node scripts/patch-icon.js",
-    "dist": "npm run icon && electron-vite build && electron-builder && node scripts/patch-icon.js"
+    "pack": "set \"CSC_IDENTITY_AUTO_DISCOVERY=false\" && npm run icon && electron-vite build && electron-builder --dir && node scripts/patch-icon.js",
+    "dist": "set \"CSC_IDENTITY_AUTO_DISCOVERY=false\" && npm run icon && electron-vite build && electron-builder && node scripts/patch-icon.js"
   },
   "build": {
     "appId": "com.passbox.app",

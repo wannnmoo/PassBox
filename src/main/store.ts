@@ -5,6 +5,7 @@
  *   - 确定文件路径（便携模式 vs 开发模式）
  *   - 文件存在性检查
  *   - 同步读写操作（因为主进程的 IPC handler 在异步上下文中调用，同步读写足够快）
+ *   - 保存前自动备份（滚动保留最近 N 份）
  *   - 删除保险库文件
  *
  * 存储路径策略：
@@ -60,18 +61,77 @@ export function readVault(): string {
   return fs.readFileSync(vaultPath(), 'utf8')
 }
 
+/** 备份滚动保留份数 —— 太多占用磁盘，太少失去历史价值，5 份是合理平衡 */
+const BACKUP_KEEP = 5
+
+/**
+ * 生成备份文件名的固定宽度时间戳
+ *
+ * YYYYMMDD-HHmmss-SSS 格式保证按文件名字典序排序 == 按时间先后排序，
+ * 便于清理旧备份；毫秒精度避免同一秒内多次保存导致文件名冲突。
+ */
+function backupTimestamp(date = new Date()): string {
+  const pad = (n: number, len = 2): string => String(n).padStart(len, '0')
+  return (
+    pad(date.getFullYear(), 4) +
+    pad(date.getMonth() + 1) +
+    pad(date.getDate()) +
+    '-' +
+    pad(date.getHours()) +
+    pad(date.getMinutes()) +
+    pad(date.getSeconds()) +
+    '-' +
+    pad(date.getMilliseconds(), 3)
+  )
+}
+
+/** 清理超出保留份数的旧备份（文件名按字典序排序，最旧在前） */
+function pruneBackups(file: string): void {
+  const dir = path.dirname(file)
+  const prefix = `${path.basename(file)}.bak-`
+  const backups = fs
+    .readdirSync(dir)
+    .filter((name) => name.startsWith(prefix))
+    .sort()
+  while (backups.length > BACKUP_KEEP) {
+    const oldest = backups.shift()!
+    fs.unlinkSync(path.join(dir, oldest))
+  }
+}
+
+/**
+ * 保存前备份当前 vault.dat（滚动保留最近 BACKUP_KEEP 份）
+ *
+ * 在原子写入覆盖 vault.dat 之前，先把当前版本复制为带时间戳的备份
+ * （如 vault.dat.bak-20260809-120000-123）。这样即使新写入损坏，
+ * 仍有历史版本可恢复，与原子写入构成双重保险。
+ * 备份是尽力而为（best-effort）：失败只记录警告，不阻塞保存。
+ */
+function backupVault(file: string): void {
+  try {
+    if (!fs.existsSync(file)) return
+    fs.copyFileSync(file, `${file}.bak-${backupTimestamp()}`)
+    pruneBackups(file)
+  } catch (err) {
+    // 备份失败不应阻塞保存 —— 主文件仍会正常写入
+    console.warn('[store] 保险库备份失败:', err)
+  }
+}
+
 /**
  * 写入保险库文件
  *
- * 将加密后的 JSON 数据写入 vault.dat，采用原子写入：
- *   先写临时文件，再重命名为正式文件，避免写入过程中断导致 vault.dat 损坏
- *   （直接覆盖写入时，进程崩溃/断电可能留下截断的坏文件）。
- * rename 在 Windows 上会覆盖已存在的目标文件。
+ * 将加密后的 JSON 数据写入 vault.dat，分两步保护数据：
+ *   1. 先备份当前版本（滚动保留最近 BACKUP_KEEP 份）
+ *   2. 原子写入：先写临时文件，再重命名为正式文件
+ *      避免写入过程中断导致 vault.dat 损坏（直接覆盖时，进程崩溃/断电
+ *      可能留下截断的坏文件）。rename 在 Windows 上会覆盖已存在的目标文件。
  *
  * @param data - 要写入的字符串（加密后的 JSON）
  */
 export function writeVault(data: string): void {
   const file = vaultPath()
+  backupVault(file)
   const tmp = file + '.tmp'
   fs.writeFileSync(tmp, data, 'utf8')
   fs.renameSync(tmp, file)

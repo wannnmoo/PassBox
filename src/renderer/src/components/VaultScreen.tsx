@@ -43,7 +43,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react'
-import { Lock, Key, Sun, Moon, FolderOpen } from 'lucide-react'
+import { Lock, Key, Sun, Moon, FolderOpen, Timer, Plus } from 'lucide-react'
 import { vault, entries as entriesApi } from '../api'
 import { useToast } from './Toast'
 import type { PasswordEntry } from '../types'
@@ -451,30 +451,34 @@ export default memo(function VaultScreen({ onLocked, theme, onToggleTheme }: Pro
           </button>
         </div>
 
-        {/* 自动锁定时间设置 — 下拉菜单 */}
-        <div className="auto-lock-setting">
-          <span className="auto-lock-label">自动锁定</span>
-          <select
-            className="auto-lock-select"
-            value={autoLockMinutes}
-            onChange={(e) => setAutoLockMinutes(Number(e.target.value))}
-          >
-            <option value={1}>1 分钟</option>
-            <option value={5}>5 分钟</option>
-            <option value={10}>10 分钟</option>
-            <option value={15}>15 分钟</option>
-            <option value={30}>30 分钟</option>
-            <option value={0}>关闭</option>
-          </select>
-        </div>
+        {/* 工具栏：搜索框 + 自动锁定（合并成一条，侧边栏更紧凑） */}
+        <div className="sidebar-toolbar">
+          {/* 搜索框（ref 供 Ctrl+F） */}
+          <SearchBox ref={searchInputRef} value={searchQuery} onChange={setSearchQuery} />
 
-        {/* 搜索框（ref 供 Ctrl+F） */}
-        <SearchBox ref={searchInputRef} value={searchQuery} onChange={setSearchQuery} />
+          {/* 自动锁定时间设置 — 紧凑下拉，图标提示 */}
+          <div className="auto-lock-setting" title="自动锁定时间">
+            <Timer size={14} />
+            <select
+              className="auto-lock-select"
+              value={autoLockMinutes}
+              onChange={(e) => setAutoLockMinutes(Number(e.target.value))}
+            >
+              <option value={1}>1 分钟</option>
+              <option value={5}>5 分钟</option>
+              <option value={10}>10 分钟</option>
+              <option value={15}>15 分钟</option>
+              <option value={30}>30 分钟</option>
+              <option value={0}>关闭</option>
+            </select>
+          </div>
+        </div>
 
         {/* 条目列表（支持拖拽排序） */}
         <EntryList
           entries={filteredEntries}
           selectedId={selectedId}
+          query={searchQuery}
           onSelect={handleSelectEntry}
           onAdd={handleStartAdd}
           onReorder={handleReorder}
@@ -524,17 +528,25 @@ export default memo(function VaultScreen({ onLocked, theme, onToggleTheme }: Pro
           viewMode === 'change-password' ? (
             <ChangePasswordScreen onClose={handleCloseChangePassword} />
           ) : selectedEntry ? (
+            // key=id：切换条目时重挂组件，避免 fullEntry 缓存残留上一条的明文数据
             <EntryDetail
+              key={selectedEntry.id}
               entry={selectedEntry}
               onEdit={handleEdit}
               onDelete={handleDelete}
             />
           ) : (
-            // 空状态：无选中条目时显示提示
+            // 空状态：无选中条目时显示引导提示
             <div className="main-empty">
               <div className="main-empty-icon"><FolderOpen size={36} /></div>
               <h2>选择一个条目</h2>
-              <p>或 <button className="btn-link" onClick={handleStartAdd}>添加新记录 (Ctrl+N)</button></p>
+              <p>从左侧列表选择一条记录查看详情</p>
+              <button className="btn-empty-action" onClick={handleStartAdd}>
+                <Plus size={16} /> 添加新记录
+              </button>
+              <p className="main-empty-hint">
+                或按 <kbd>Ctrl</kbd> + <kbd>N</kbd> 快速新建
+              </p>
             </div>
           )
         ) : null}

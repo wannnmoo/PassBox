@@ -41,6 +41,12 @@ npm run icon         # 单独生成图标（scripts/make-icon.js → resources/i
 - **组件优化**：`VaultScreen` 和 `EntryList` 使用 `React.memo()` 避免不必要重渲染
 - **拖拽排序**：使用原生 HTML5 Drag and Drop API（`draggable` 属性 + `dragStart` / `dragOver` / `drop` 事件），未引入第三方拖拽库
 - **主题初始化**：`getInitialTheme()` 从 `localStorage('theme')` 恢复上次主题选择，无记录时默认 `'light'`。主题在渲染阶段通过 `applyTheme()` 同步到 DOM 与 localStorage（无 useEffect，确保首次渲染前生效、避免闪烁）
+- **侧边栏布局**：搜索框 + 自动锁定下拉合并为一条 `.sidebar-toolbar`（Timer 图标提示），侧边栏顶部更紧凑
+- **列表条目**：服务首字母头像（统一绿色 `--accent`）；选中条目高亮为绿色左边框 + 绿色背景（`.entry-item.selected`）；条目右侧显示相对更新时间（刚刚 / N 分钟前）
+- **搜索高亮**：EntryList 接收 `query` prop，命中关键词用 `<mark>` 高亮（服务名 + 用户名）
+- **剪贴板倒计时**：详情页复制密码后，复制按钮显示 30 秒倒计时圆环（CSS `ring-countdown` 动画 + `onAnimationEnd`），把"30 秒自动清除"变成可见反馈
+- **密码掩码**：详情页掩码按实际密码长度生成（`'•'.repeat(length)`），与明文长度一致
+- **滚动条**：全局统一 `*::-webkit-scrollbar` 样式（透明轨道 + 4px 悬浮圆角滑块），所有可滚动区域（侧边栏、主面板、备注 textarea）共用。注意不要加 `scrollbar-width`/`scrollbar-color` 标准属性——Chromium 会因此忽略 `::-webkit-scrollbar` 自定义样式
 
 ### 开发注意事项
 
@@ -160,7 +166,7 @@ VaultScreen 中的闲置监控机制，细节对维护很重要：
 
 ### 安全实现细节
 
-- `writeVault()` 采用**原子写入**（先写 `vault.dat.tmp` 再 `rename` 覆盖），写入中断不会损坏 vault.dat
+- `writeVault()` 采用**原子写入**（先写 `vault.dat.tmp` 再 `rename` 覆盖），写入中断不会损坏 vault.dat；写入前还会先把当前版本备份为带时间戳的 `vault.dat.bak-YYYYMMDD-HHmmss-SSS` 文件（[store.ts](src/main/store.ts) `BACKUP_KEEP` 常量，滚动保留最近 5 份），与原子写入构成双重保险
 - `lockVault()` 对 key Buffer 做显式清零（`fill(0)`）后置 null，修改主密码时也会清零旧密钥，防止密钥残留在内存中
 - `generatePassword()` 使用**拒绝采样**（rejection sampling）消除 `% charset.length` 的取模偏差，保证每个字符等概率出现，且长度小于选中字符类型数时自动取类型数
 
@@ -168,6 +174,8 @@ VaultScreen 中的闲置监控机制，细节对维护很重要：
 
 - **生产模式**（`app.isPackaged`）：`vault.dat` 在 exe 同级目录（便携模式）
 - **开发模式**：`vault.dat` 在 `app.getPath('userData')` 目录
+
+自动备份文件（`vault.dat.bak-时间戳`）与 `vault.dat` 存放在同一目录，滚动保留最近 5 份。
 
 [store.ts](src/main/store.ts) 还导出了 `deleteVault()` 函数用于删除 vault.dat 文件，但当前未被任何代码调用（保留用于未来"重置保险库"功能）。
 
@@ -182,6 +190,7 @@ VaultScreen 中的闲置监控机制，细节对维护很重要：
 - `electron.vite.config.ts`：主进程/preload 使用 `externalizeDepsPlugin`，渲染进程使用 `@vitejs/plugin-react`
 - TypeScript 三个 config：根 `tsconfig.json`（references）、`tsconfig.node.json`（主进程+preload）、`tsconfig.web.json`（渲染进程，`jsx: "react-jsx"`）
 - electron-builder 目标：Windows portable x64（单文件 exe，非安装器）。`package.json` 中保留有 NSIS 配置（允许选择安装目录、创建桌面快捷方式），但当前 portable 目标下该配置不生效
+- **签名坑**：`pack`/`dist` 脚本开头有 `set "CSC_IDENTITY_AUTO_DISCOVERY=false"` —— 本应用无签名证书，必须禁用 electron-builder 的自动签名发现。否则它会下载 winCodeSign 工具包，而 7-Zip 解压该包时需在 Windows 创建符号链接（darwin/macOS 二进制），无管理员权限/开发者模式时必然失败（"客户端没有所需的特权"）
 - 图标通过 `scripts/make-icon.js` 程序化生成（纯 Node.js PNG 编码器，无需 Canvas），然后 `scripts/patch-icon.js` 用 rcedit 修补 exe
 
 ### UI 主题

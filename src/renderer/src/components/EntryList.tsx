@@ -4,11 +4,13 @@
  * 职责：侧边栏中的条目列表，支持选择、添加、拖拽排序
  *
  * 功能：
- *   - 展示保险库中所有条目（服务名称 + 用户名）
+ *   - 展示保险库中所有条目（服务名称 + 用户名 + 相对更新时间）
  *   - 高亮当前选中的条目（绿色左边框 + 高亮背景）
  *   - 空状态提示（还没有保存任何密码）
  *   - 添加按钮（+ 圆形按钮）
  *   - HTML5 拖拽排序（原生拖拽 API，无需第三方库）
+ *   - 搜索关键词命中高亮（<mark> 包裹匹配片段）
+ *   - 服务首字母头像图标
  *
  * 拖拽实现（HTML5 Drag and Drop API）：
  *   - dragStart：记录被拖拽条目的索引
@@ -23,20 +25,57 @@
  */
 
 import { memo, useState, useCallback } from 'react'
+import type { ReactNode } from 'react'
 import { Plus, GripVertical } from 'lucide-react'
 import type { PasswordEntry } from '../types'
 
 interface Props {
   entries: PasswordEntry[]                 // 条目列表
   selectedId: string | null               // 当前选中的条目 ID
+  query: string                           // 搜索关键词（用于命中高亮）
   onSelect: (id: string) => void          // 选择条目回调
   onAdd: () => void                       // 添加新条目回调（Ctrl+N）
   onReorder: (orderedIds: string[]) => void  // 排序变更回调（传入新的 ID 顺序）
 }
 
+/**
+ * 相对时间格式化：刚刚 / N 分钟前 / N 小时前 / N 天前 / 日期
+ */
+function formatRelativeTime(ts: number): string {
+  const minutes = Math.floor((Date.now() - ts) / 60_000)
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时前`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days} 天前`
+  return new Date(ts).toLocaleDateString()
+}
+
+/**
+ * 搜索命中高亮：用 <mark> 包裹文本中匹配 query 的片段（不区分大小写）
+ */
+function Highlight({ text, query }: { text: string; query: string }): ReactNode {
+  const q = query.trim().toLowerCase()
+  if (!q || !text) return text
+  const lower = text.toLowerCase()
+  const parts: ReactNode[] = []
+  let from = 0
+  let idx = lower.indexOf(q, from)
+  while (idx !== -1) {
+    if (idx > from) parts.push(text.slice(from, idx))
+    parts.push(<mark key={idx}>{text.slice(idx, idx + q.length)}</mark>)
+    from = idx + q.length
+    idx = lower.indexOf(q, from)
+  }
+  if (from < text.length) parts.push(text.slice(from))
+  return <>{parts}</>
+}
+
 export default memo(function EntryList({
   entries,
   selectedId,
+  query,
   onSelect,
   onAdd,
   onReorder
@@ -125,6 +164,9 @@ export default memo(function EntryList({
             <button className="btn-primary" onClick={onAdd}>
               添加第一条记录
             </button>
+            <p className="entry-list-hint">
+              或按 <kbd>Ctrl</kbd> + <kbd>N</kbd>
+            </p>
           </div>
         ) : (
           // 条目列表
@@ -150,11 +192,17 @@ export default memo(function EntryList({
               <div className="entry-item-icon">
                 {entry.service.charAt(0).toUpperCase()}
               </div>
-              {/* 服务名称 + 用户名 */}
+              {/* 服务名称 + 用户名（搜索时高亮命中片段） */}
               <div className="entry-item-info">
-                <div className="entry-item-service">{entry.service}</div>
-                <div className="entry-item-username">{entry.username}</div>
+                <div className="entry-item-service">
+                  <Highlight text={entry.service} query={query} />
+                </div>
+                <div className="entry-item-username">
+                  <Highlight text={entry.username} query={query} />
+                </div>
               </div>
+              {/* 相对更新时间 */}
+              <span className="entry-item-time">{formatRelativeTime(entry.updatedAt)}</span>
             </div>
           ))
         )}

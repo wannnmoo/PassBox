@@ -14,8 +14,7 @@
  *   渲染进程只知道它需要的 API，不知道底层 IPC 机制的存在。
  *
  * 类型安全性：
- *   此文件还定义了 Entry、NewEntry、PasswordOptions 接口，
- *   与主进程的 vault.ts 和渲染进程的 types.ts 保持同步。
+ *   所有跨进程类型统一从 src/shared/types.ts 导入（单一来源），
  *   env.d.ts 中声明了 Window.api 的类型，确保 TypeScript 类型检查。
  */
 

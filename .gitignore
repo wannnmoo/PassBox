@@ -8,6 +8,9 @@ release/
 # 保险库数据（加密密码文件，绝对不能提交）
 vault.dat
 
+# 保险库自动备份（同 vault.dat，含加密内容，也不能提交）
+vault.dat.bak-*
+
 # Claude Code 会话数据（每次会话不同，不需要版本控制）
 .claude/sessions/
 .claude/worktrees/

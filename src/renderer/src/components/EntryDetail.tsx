@@ -5,7 +5,7 @@
  *
  * 功能：
  *   - 显示条目的所有字段（服务名、用户名、密码、网址、备注）
- *   - 密码显示/隐藏切换（默认掩码 ••••••••••••••••）
+ *   - 密码显示/隐藏切换（默认按实际长度掩码 •••）
  *   - 复制密码到剪贴板（30 秒后自动清除）
  *   - 编辑按钮 → 切换到编辑模式
  *   - 删除按钮 → 弹出确认对话框（自定义 ConfirmDialog，非原生 confirm）
@@ -38,6 +38,8 @@ export default memo(function EntryDetail({ entry, onEdit, onDelete }: Props): JS
   const [copied, setCopied] = useState(false)                  // 是否刚复制
   const [fullEntry, setFullEntry] = useState<PasswordEntry | null>(null)  // 含明文密码的完整条目
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)      // 删除确认对话框
+  const [copying, setCopying] = useState(false)               // 剪贴板 30 秒倒计时环是否显示
+  const [copySeq, setCopySeq] = useState(0)                   // 复制次数（作为 key 重启倒计时动画）
   const { showToast } = useToast()
 
   /**
@@ -97,14 +99,20 @@ export default memo(function EntryDetail({ entry, onEdit, onDelete }: Props): JS
    * 复制密码到剪贴板
    *
    * 调用主进程 clipboard.writeText（而非 navigator.clipboard），
-   * 以利用 30 秒自动清除功能。
+   * 以利用 30 秒自动清除功能。复制后按钮上显示 30 秒倒计时圆环，
+   * 把"自动清除"变成可见反馈（圆环走完 = 剪贴板已清除）。
    */
   const handleCopy = useCallback(async () => {
     await passwordApi.copy(displayEntry.id)
     setCopied(true)
+    setCopying(true)
+    setCopySeq((n) => n + 1)          // 触发圆环动画重新开始
     showToast('密码已复制')
     setTimeout(() => setCopied(false), 2000)
   }, [displayEntry.id, showToast])
+
+  /** 30 秒倒计时圆环动画结束 → 隐藏圆环 */
+  const handleRingEnd = useCallback(() => setCopying(false), [])
 
   const handleDeleteClick = useCallback(() => setShowDeleteConfirm(true), [])
 
@@ -156,7 +164,7 @@ export default memo(function EntryDetail({ entry, onEdit, onDelete }: Props): JS
           <label>密码</label>
           <div className="detail-field-value password-field">
             <span className="password-text">
-              {showPassword ? displayEntry.password : '••••••••••••••••'}
+              {showPassword ? displayEntry.password : '•'.repeat(displayEntry.password.length)}
             </span>
             <button
               className="btn-toggle-password"
@@ -168,9 +176,16 @@ export default memo(function EntryDetail({ entry, onEdit, onDelete }: Props): JS
             <button
               className={`btn-copy ${copied ? 'copied' : ''}`}
               onClick={handleCopy}
-              title="复制密码"
+              title={copying ? '剪贴板 30 秒后自动清除' : '复制密码'}
             >
               {copied ? <Check size={18} /> : <Copy size={18} />}
+              {/* 30 秒倒计时圆环：圆环走完 = 剪贴板自动清除 */}
+              {copying && (
+                <svg className="copy-ring" viewBox="0 0 36 36" onAnimationEnd={handleRingEnd}>
+                  <circle className="copy-ring-track" cx="18" cy="18" r="16" />
+                  <circle key={copySeq} className="copy-ring-progress" cx="18" cy="18" r="16" />
+                </svg>
+              )}
             </button>
           </div>
           {/* 密码强度条 — 仅在显示密码时展示 */}

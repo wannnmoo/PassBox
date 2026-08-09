@@ -539,15 +539,6 @@ button:disabled {
   border-bottom: 1px solid var(--border);
 }
 
-.auto-lock-label {
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
-}
-
 .auto-lock-select {
   flex: 1;
   padding: 4px 8px;
@@ -570,6 +561,38 @@ button:disabled {
 .auto-lock-select option {
   background: var(--bg-surface);
   color: var(--text);
+}
+
+/* ── Sidebar Toolbar（搜索框 + 自动锁定合并一行）───── */
+
+.sidebar-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-toolbar .search-box {
+  flex: 1;
+  min-width: 0;               /* 允许输入框在窄宽度下收缩而非撑破布局 */
+  padding: 0;
+  border-bottom: none;
+}
+
+.sidebar-toolbar .auto-lock-setting {
+  padding: 0;
+  border-bottom: none;
+  gap: 5px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.sidebar-toolbar .auto-lock-select {
+  flex: none;
+  width: 76px;
+  padding: 4px 6px;
+  font-size: 11px;
 }
 
 /* ── Entry List ─────────────────────────────────── */
@@ -621,19 +644,6 @@ button:disabled {
   overflow-y: auto;
 }
 
-.entry-list-items::-webkit-scrollbar {
-  width: 4px;
-}
-
-.entry-list-items::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.entry-list-items::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
-}
-
 .entry-list-empty {
   display: flex;
   flex-direction: column;
@@ -647,6 +657,14 @@ button:disabled {
 
 .entry-list-empty p {
   font-size: 13px;
+}
+
+.entry-list-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .entry-item {
@@ -673,6 +691,13 @@ button:disabled {
 }
 
 .entry-item.selected {
+  background: var(--accent-muted);
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.entry-item.selected .entry-item-service {
+  color: var(--accent);
 }
 
 .entry-item-icon {
@@ -717,6 +742,13 @@ button:disabled {
   margin-top: 1px;
 }
 
+.entry-item-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* ── Main Panel ─────────────────────────────────── */
 
 .main-panel {
@@ -758,6 +790,52 @@ button:disabled {
 
 .main-empty p {
   color: var(--text-secondary);
+}
+
+.btn-empty-action {
+  margin-top: 22px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
+}
+
+.btn-empty-action:hover {
+  background: var(--accent-hover);
+  box-shadow: 0 0 20px var(--accent-glow);
+  transform: var(--hover-scale);
+}
+
+.main-empty-hint {
+  margin-top: 18px;
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── kbd（键盘快捷键提示）与搜索高亮 mark ────────── */
+
+kbd {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  color: var(--text-secondary);
+}
+
+mark {
+  background: rgba(240, 136, 62, 0.32);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
 }
 
 /* ── Entry Detail ───────────────────────────────── */
@@ -864,6 +942,44 @@ button:disabled {
 
 .btn-copy.copied {
   color: var(--success);
+}
+
+/* ── 剪贴板 30 秒倒计时圆环 ──────────────────────── */
+
+.btn-copy {
+  position: relative;
+}
+
+.copy-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.copy-ring-track {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 2;
+}
+
+.copy-ring-progress {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  /* 周长 = 2π×16 ≈ 100.53；30 秒内 dashoffset 从 0 → 周长，圆环逐渐耗尽 */
+  stroke-dasharray: 100.53;
+  stroke-dashoffset: 0;
+  transform: rotate(-90deg);
+  transform-origin: center;
+  animation: ring-countdown 30s linear forwards;
+}
+
+@keyframes ring-countdown {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: 100.53; }
 }
 
 .detail-meta {
@@ -1075,19 +1191,29 @@ button:disabled {
   padding: 10px 28px;
 }
 
-/* ── Scrollbar ──────────────────────────────────── */
+/* ── Scrollbar（全局统一）───────────────────────────
+   所有可滚动元素（侧边栏列表、主面板、备注 textarea 等）
+   共用同一套样式，避免默认系统滚动条破坏整体风格。
+   通过透明边框 + background-clip 制造"悬浮圆角条"效果。 */
 
-.main-panel::-webkit-scrollbar {
-  width: 5px;
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
-.main-panel::-webkit-scrollbar-track {
+*::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.main-panel::-webkit-scrollbar-thumb {
+*::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 4px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
 
 /* ── Focus ring ─────────────────────────────────── */
