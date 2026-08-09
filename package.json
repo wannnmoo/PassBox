@@ -1,0 +1,61 @@
+{
+  "name": "passbox",
+  "version": "1.0.0",
+  "description": "本地密码管理器",
+  "author": "PassBox",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron .",
+    "icon": "node scripts/make-icon.js",
+    "pack": "npm run icon && electron-vite build && electron-builder --dir && node scripts/patch-icon.js",
+    "dist": "npm run icon && electron-vite build && electron-builder && node scripts/patch-icon.js"
+  },
+  "build": {
+    "appId": "com.passbox.app",
+    "productName": "PassBox",
+    "icon": "resources/icon.ico",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "electronDownload": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
+    }
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.1",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.3.0",
+    "png-to-ico": "^2.1.8",
+    "rcedit": "^4.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  },
+  "dependencies": {
+    "lucide-react": "^1.17.0"
+  }
+}
