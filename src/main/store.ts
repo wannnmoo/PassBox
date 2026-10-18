@@ -20,23 +20,51 @@ import fs from 'fs'
 import path from 'path'
 
 /**
+ * 纯函数：决定保险库数据目录（抽出来是为了能脱离 Electron 单测）
+ *
+ * 优先级：
+ *   1. 便携版 launcher 注入的 PORTABLE_EXECUTABLE_DIR（用户双击 exe 的真实目录）
+ *   2. 打包模式回退：exe 同级目录（`--dir` 打出来的 win-unpacked 走这条）
+ *   3. 开发模式：userData 目录
+ */
+export function resolveDataDir(opts: {
+  isPackaged: boolean
+  portableDir?: string | undefined
+  exePath: string
+  userDataDir: string
+}): string {
+  if (!opts.isPackaged) return opts.userDataDir
+  if (opts.portableDir) return opts.portableDir
+  return path.dirname(opts.exePath)
+}
+
+/**
  * 获取保险库文件的完整路径
  *
- * 路径判断逻辑：
- *   - app.isPackaged === true  → 生产打包模式 → exe 同级目录（便携模式）
- *   - app.isPackaged === false → 开发模式 → Electron 用户数据目录
+ * ⚠️ 便携版为什么必须先看 PORTABLE_EXECUTABLE_DIR：
+ * electron-builder 的 portable launcher 会把 app 解压到 `%TEMP%\<随机名>\` 再运行，
+ * 退出后清理该目录。所以 app.getPath('exe') 指向的是那个临时目录，
+ * 直接拿它当数据目录 → vault.dat 写进临时目录 → 关闭即丢（实测临时路径形如
+ * `C:\Users\<用户名>\AppData\Local\Temp\3KqgoGeJbGjodwkTFRZripBBIYW\PassBox.exe`）。
+ * launcher 会额外注入 PORTABLE_EXECUTABLE_DIR 指回用户双击 exe 的真实位置。
  *
  * @returns vault.dat 的绝对路径
  */
 function vaultPath(): string {
-  if (app.isPackaged) {
-    // 便携模式：vault.dat 与 exe 放在同一目录下
-    // 例如：D:\PassBox\PassBox.exe  →  D:\PassBox\vault.dat
-    return path.join(path.dirname(app.getPath('exe')), 'vault.dat')
-  }
-  // 开发模式：vault.dat 存放在 Electron 用户数据目录
-  // 例如：C:\Users\<用户名>\AppData\Roaming\passbox\vault.dat
-  return path.join(app.getPath('userData'), 'vault.dat')
+  return path.join(
+    resolveDataDir({
+      isPackaged: app.isPackaged,
+      portableDir: process.env.PORTABLE_EXECUTABLE_DIR,
+      exePath: app.getPath('exe'),
+      userDataDir: app.getPath('userData')
+    }),
+    'vault.dat'
+  )
+}
+
+/** 供测试 / 诊断使用：暴露实际使用的数据目录 */
+export function resolveVaultDir(): string {
+  return path.dirname(vaultPath())
 }
 
 /**

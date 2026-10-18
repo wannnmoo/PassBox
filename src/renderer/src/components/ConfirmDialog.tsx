@@ -32,7 +32,7 @@
  * - onCancel    取消回调
  */
 
-import { memo, useEffect, useCallback } from 'react'
+import { memo, useEffect, useCallback, useRef, useId } from 'react'
 import { TriangleAlert } from 'lucide-react'
 
 interface Props {
@@ -46,6 +46,9 @@ interface Props {
   onCancel: () => void
 }
 
+/** 卡片内可聚焦元素的选择器（用于 Tab 焦点循环） */
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
+
 /**
  * ConfirmDialog 组件
  *
@@ -54,6 +57,11 @@ interface Props {
  *   - 点击对话框卡片内部 → 阻止冒泡，不关闭
  *   - 按 Esc 键 → 取消
  *   - 确认按钮 autoFocus → 支持键盘 Enter 快速确认
+ *   - Tab / Shift+Tab 在卡片内循环（焦点不跑到背后的界面上）
+ *
+ * 无障碍：
+ *   - role="dialog" + aria-modal="true"：读屏软件进入对话框语境
+ *   - aria-labelledby / aria-describedby 关联标题与正文
  *
  * 性能优化：
  *   - memo()：dialog 内部状态（如动画）不影响父组件重渲染
@@ -69,24 +77,58 @@ export default memo(function ConfirmDialog({
   onConfirm,
   onCancel
 }: Props): JSX.Element | null {
+  const titleId = useId()
+  const descId = useId()
+  const cardRef = useRef<HTMLDivElement>(null)
+  /** 打开前的焦点元素 —— 关闭后归还焦点，避免焦点丢失到 body */
+  const previousFocusRef = useRef<HTMLElement | null>(null)
+
   /**
-   * 键盘事件处理 — Esc 关闭对话框
+   * 键盘事件处理 — Esc 关闭、Tab 循环
    *
-   * 使用 useCallback 配合 useEffect 依赖数组，
-   * 确保事件监听器中的 onCancel 始终是最新的引用。
+   * 注意：这里用捕获阶段（第三个参数 true）注册并在 Esc 时
+   * stopImmediatePropagation。VaultScreen 与 EntryDetail 也在 document 上
+   * 监听 keydown 处理 Esc（退出编辑/清除选中），不拦住会出现"一次 Esc 退两层"。
    */
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel()
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        onCancel()
+        return
+      }
+
+      if (e.key !== 'Tab') return
+
+      // 焦点循环：避免 Tab 把焦点移到遮罩背后的界面元素上
+      const card = cardRef.current
+      if (!card) return
+      const nodes = Array.from(card.querySelectorAll<HTMLElement>(FOCUSABLE))
+      if (nodes.length === 0) return
+      const first = nodes[0]
+      const last = nodes[nodes.length - 1]
+      const active = document.activeElement
+
+      if (e.shiftKey && (active === first || !card.contains(active))) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault()
+        first.focus()
+      }
     },
     [onCancel]
   )
 
-  // 仅在对话框打开时注册 Esc 监听器，关闭时自动移除
+  // 仅在对话框打开时注册监听器；打开时记住原焦点，关闭时归还
   useEffect(() => {
-    if (open) {
-      document.addEventListener('keydown', handleKeyDown)
-      return () => document.removeEventListener('keydown', handleKeyDown)
+    if (!open) return
+    previousFocusRef.current = document.activeElement as HTMLElement | null
+    document.addEventListener('keydown', handleKeyDown, true)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true)
+      previousFocusRef.current?.focus?.()
     }
   }, [open, handleKeyDown])
 
@@ -97,15 +139,23 @@ export default memo(function ConfirmDialog({
     // 遮罩层 — 点击遮罩关闭对话框
     <div className="dialog-overlay" onClick={onCancel}>
       {/* 对话框卡片 — stopPropagation 防止点击卡片内部触发遮罩关闭 */}
-      <div className="dialog-card" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="dialog-card"
+        ref={cardRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descId}
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* danger 模式：显示红色三角形警告图标 */}
         {danger && (
-          <div className="dialog-icon">
+          <div className="dialog-icon" aria-hidden="true">
             <TriangleAlert size={28} />
           </div>
         )}
-        <h3 className="dialog-title">{title}</h3>
-        <p className="dialog-message">{message}</p>
+        <h3 className="dialog-title" id={titleId}>{title}</h3>
+        <p className="dialog-message" id={descId}>{message}</p>
         <div className="dialog-actions">
           {/* 取消按钮：始终使用次要样式 */}
           <button className="btn-secondary" onClick={onCancel}>

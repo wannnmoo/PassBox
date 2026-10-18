@@ -37,3 +37,33 @@ export interface VaultStatus {
   isUnlocked: boolean   // 保险库是否已解锁
   exists: boolean       // 保险库文件是否存在
 }
+
+/**
+ * 解锁失败原因
+ *
+ * 之所以要区分，是因为三种失败的处置方式完全不同：
+ *   - missing       ：vault.dat 不存在（被删/路径变化）→ 可引导用户重新创建
+ *   - bad-password  ：GCM authTag 校验失败，密码错误 → 重试即可
+ *   - corrupt       ：文件存在但 JSON/字段/密文结构损坏 → 重试无用，需用备份恢复
+ * 早先实现把三者都当成 false，导致文件损坏时提示"密码错误"，用户会一直重试。
+ */
+export type UnlockFailureReason = 'missing' | 'bad-password' | 'corrupt'
+
+/** 解锁结果 — 从 vault:unlock IPC 通道返回 */
+export interface UnlockResult {
+  ok: boolean
+  reason?: UnlockFailureReason
+}
+
+/**
+ * 修改主密码失败原因
+ *   - bad-password ：旧密码校验失败
+ *   - write-failed ：旧密码正确但写入磁盘失败（磁盘满/无权限），此时磁盘上仍是旧密码版本
+ */
+export type ChangePasswordFailureReason = 'bad-password' | 'write-failed'
+
+/** 修改主密码结果 — 从 vault:change-password IPC 通道返回 */
+export interface ChangePasswordResult {
+  ok: boolean
+  reason?: ChangePasswordFailureReason
+}

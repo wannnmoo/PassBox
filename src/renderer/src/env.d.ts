@@ -14,7 +14,14 @@
 
 /// <reference types="vite/client" />
 
-import type { PasswordEntry, NewPasswordEntry, PasswordOptions, VaultStatus } from '../../shared/types'
+import type {
+  PasswordEntry,
+  NewPasswordEntry,
+  PasswordOptions,
+  VaultStatus,
+  UnlockResult,
+  ChangePasswordResult
+} from '../../shared/types'
 
 /**
  * 扩展全局 Window 接口
@@ -30,9 +37,9 @@ declare global {
       vault: {
         exists: () => Promise<boolean>
         create: (masterPassword: string) => Promise<void>
-        unlock: (masterPassword: string) => Promise<boolean>
+        unlock: (masterPassword: string) => Promise<UnlockResult>
         lock: () => Promise<void>
-        changePassword: (oldPassword: string, newPassword: string) => Promise<boolean>
+        changePassword: (oldPassword: string, newPassword: string) => Promise<ChangePasswordResult>
         status: () => Promise<VaultStatus>
       }
       /** 条目 CRUD API */

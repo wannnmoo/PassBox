@@ -41,6 +41,20 @@
   --warning: #d2991b;
   --success: #2ea043;
 
+  /* Foreground on colored buttons (统一入口，避免规则里散落 #fff) */
+  --text-on-accent: #ffffff;
+
+  /* Toast 三态配色 — 亮/暗主题各自覆盖，规则里只引用变量 */
+  --toast-success-bg: #0d2818;
+  --toast-success-border: rgba(0, 200, 83, 0.3);
+  --toast-success-text: #2ea043;
+  --toast-error-bg: #2b1010;
+  --toast-error-border: rgba(255, 68, 68, 0.3);
+  --toast-error-text: #ff4444;
+  --toast-info-bg: #1a1a30;
+  --toast-info-border: rgba(255, 255, 255, 0.12);
+  --toast-info-text: var(--text);
+
   /* Measurements */
   --radius-sm: 6px;
   --radius: 10px;
@@ -85,6 +99,19 @@
   --danger-hover: #ee3d47;
   --warning: #9a6700;
   --success: #1a7f37;
+
+  --text-on-accent: #ffffff;
+
+  /* Toast 亮色态：浅底 + 深字，保证对比度 */
+  --toast-success-bg: #e6f7ee;
+  --toast-success-border: rgba(26, 127, 55, 0.2);
+  --toast-success-text: #1a7f37;
+  --toast-error-bg: #fde8e8;
+  --toast-error-border: rgba(207, 34, 46, 0.2);
+  --toast-error-text: #cf222e;
+  --toast-info-bg: #f0f0f5;
+  --toast-info-border: rgba(0, 0, 0, 0.08);
+  --toast-info-text: #1a1a2e;
 
   --unlock-bg-start: #f6f8fa;
   --unlock-bg-end: #eceff4;
@@ -198,7 +225,7 @@ button:disabled {
 
 .btn-primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-weight: 600;
   display: inline-flex;
   align-items: center;
@@ -234,7 +261,7 @@ button:disabled {
 
 .btn-danger:hover:not(:disabled) {
   background: var(--danger);
-  color: #fff;
+  color: var(--text-on-accent);
   box-shadow: 0 0 20px var(--danger-glow);
   transform: var(--hover-scale);
 }
@@ -324,7 +351,7 @@ button:disabled {
   font-size: 15px;
   margin-top: 8px;
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-weight: 600;
   border-radius: var(--radius-input);
 }
@@ -342,6 +369,15 @@ button:disabled {
   align-items: center;
   justify-content: center;
   gap: 4px;
+}
+
+/* 创建保险库时的强度建议：低饱和提示，不抢错误提示的位置 */
+.unlock-hint {
+  margin-top: -4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .unlock-warning {
@@ -622,7 +658,7 @@ button:disabled {
 
 .btn-add {
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   width: 30px;
   height: 30px;
   border-radius: 50%;
@@ -795,7 +831,7 @@ button:disabled {
 .btn-empty-action {
   margin-top: 22px;
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-weight: 600;
   display: inline-flex;
   align-items: center;
@@ -1223,6 +1259,26 @@ mark {
   outline-offset: 2px;
 }
 
+/* 交互控件统一键盘焦点样式 —— 全局 :focus-visible 只画轮廓，
+   这里补上按钮/输入框在深色底上的可见性（轮廓 + 柔光） */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-muted);
+}
+
+/* 圆形图标按钮：焦点轮廓也做成圆形，避免方形轮廓套在圆形按钮上 */
+.btn-add:focus-visible,
+.btn-lock:focus-visible,
+.btn-theme-toggle:focus-visible,
+.btn-change-password:focus-visible,
+.btn-toggle-password:focus-visible {
+  border-radius: 999px;
+}
+
 /* ═══════════════════════════════════════════════════
    Toast Notifications
    ═══════════════════════════════════════════════════ */
@@ -1261,21 +1317,21 @@ mark {
 }
 
 .toast-success {
-  background: #0d2818;
-  border: 1px solid rgba(0, 200, 83, 0.3);
-  color: #2ea043;
+  background: var(--toast-success-bg);
+  border: 1px solid var(--toast-success-border);
+  color: var(--toast-success-text);
 }
 
 .toast-error {
-  background: #2b1010;
-  border: 1px solid rgba(255, 68, 68, 0.3);
-  color: #ff4444;
+  background: var(--toast-error-bg);
+  border: 1px solid var(--toast-error-border);
+  color: var(--toast-error-text);
 }
 
 .toast-info {
-  background: #1a1a30;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: var(--text);
+  background: var(--toast-info-bg);
+  border: 1px solid var(--toast-info-border);
+  color: var(--toast-info-text);
 }
 
 .toast-icon {
@@ -1299,23 +1355,6 @@ mark {
   }
 }
 
-[data-theme='light'] .toast-success {
-  background: #e6f7ee;
-  border-color: rgba(26, 127, 55, 0.2);
-  color: #1a7f37;
-}
-
-[data-theme='light'] .toast-error {
-  background: #fde8e8;
-  border-color: rgba(207, 34, 46, 0.2);
-  color: #cf222e;
-}
-
-[data-theme='light'] .toast-info {
-  background: #f0f0f5;
-  border-color: rgba(0, 0, 0, 0.08);
-  color: #1a1a2e;
-}
 
 /* ═══════════════════════════════════════════════════
    Confirm Dialog

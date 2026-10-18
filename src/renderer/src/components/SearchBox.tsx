@@ -40,6 +40,7 @@ const SearchBox = memo(
         {/* 搜索图标 — flex-shrink: 0 防止被压缩 */}
         <Search size={16} className="search-icon-svg" />
         <input
+          aria-label="搜索条目"
           ref={ref}                           // 转发 ref，供 Ctrl+F 快捷键使用
           type="text"
           placeholder="搜索... (Ctrl+F)"      // 提示用户有快捷键可用

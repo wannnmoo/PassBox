@@ -19,7 +19,13 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron'
-import type { PasswordEntry, NewPasswordEntry, PasswordOptions } from '../shared/types'
+import type {
+  PasswordEntry,
+  NewPasswordEntry,
+  PasswordOptions,
+  UnlockResult,
+  ChangePasswordResult
+} from '../shared/types'
 
 /**
  * 通过 contextBridge 暴露到渲染进程的 API 对象
@@ -39,13 +45,13 @@ const api = {
     /** 创建新保险库（首次使用） */
     create: (masterPassword: string): Promise<void> =>
       ipcRenderer.invoke('vault:create', masterPassword),
-    /** 解锁保险库（验证主密码） */
-    unlock: (masterPassword: string): Promise<boolean> =>
+    /** 解锁保险库（验证主密码）→ 返回成功与否及失败原因 */
+    unlock: (masterPassword: string): Promise<UnlockResult> =>
       ipcRenderer.invoke('vault:unlock', masterPassword),
     /** 锁定保险库（清空内存数据） */
     lock: (): Promise<void> => ipcRenderer.invoke('vault:lock'),
-    /** 修改主密码 */
-    changePassword: (oldPassword: string, newPassword: string): Promise<boolean> =>
+    /** 修改主密码 → 返回成功与否及失败原因 */
+    changePassword: (oldPassword: string, newPassword: string): Promise<ChangePasswordResult> =>
       ipcRenderer.invoke('vault:change-password', oldPassword, newPassword),
     /** 获取保险库当前状态 */
     status: (): Promise<{ isUnlocked: boolean; exists: boolean }> =>

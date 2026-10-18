@@ -5,14 +5,14 @@
  *
  * 流程：
  *   1. 输入当前主密码（验证身份）
- *   2. 输入新主密码（至少 6 位）
+ *   2. 输入新主密码（至少 8 位）
  *   3. 确认新主密码（防止输错）
  *   4. 提交 → 主进程验证旧密码 → 生成新 salt → 重新加密 → 覆盖 vault.dat
  *
  * 安全策略：
  *   - 必须验证旧密码才能修改（防止未授权修改）
  *   - 新密码不能与旧密码相同
- *   - 新密码至少 6 位
+ *   - 新密码至少 8 位（与创建保险库时的下限保持一致）
  *   - 修改成功后显示确认界面和警告提示
  *   - 不显示密码明文（type="password"）
  */
@@ -20,6 +20,9 @@
 import { useState, useCallback, memo } from 'react'
 import { CircleCheck } from 'lucide-react'
 import { vault } from '../api'
+
+/** 新主密码最小长度 —— 与 UnlockScreen 创建保险库时的下限保持一致 */
+const MIN_MASTER_PASSWORD_LENGTH = 8
 
 interface Props {
   onClose: () => void  // 关闭修改密码界面，返回主界面
@@ -55,8 +58,8 @@ export default memo(function ChangePasswordScreen({ onClose }: Props): JSX.Eleme
       setError('请输入新主密码')
       return
     }
-    if (newPassword.length < 6) {
-      setError('新主密码至少需要 6 位')
+    if (newPassword.length < MIN_MASTER_PASSWORD_LENGTH) {
+      setError(`新主密码至少需要 ${MIN_MASTER_PASSWORD_LENGTH} 位`)
       return
     }
     if (newPassword === oldPassword) {
@@ -70,9 +73,14 @@ export default memo(function ChangePasswordScreen({ onClose }: Props): JSX.Eleme
 
     setLoading(true)
     try {
-      const ok = await vault.changePassword(oldPassword, newPassword)
-      if (!ok) {
-        setError('当前主密码错误')  // 主进程返回 false = 旧密码验证失败
+      const result = await vault.changePassword(oldPassword, newPassword)
+      if (!result.ok) {
+        // 写盘失败时磁盘上仍是旧密码版本，必须如实告知，否则用户会以为已改
+        setError(
+          result.reason === 'write-failed'
+            ? '写入失败：磁盘可能已满或无写入权限，主密码未改变'
+            : '当前主密码错误'
+        )
         setLoading(false)
         return
       }
@@ -112,6 +120,7 @@ export default memo(function ChangePasswordScreen({ onClose }: Props): JSX.Eleme
               <label>当前主密码</label>
               <input
                 type="password"
+                aria-label="当前主密码"
                 placeholder="输入当前主密码"
                 value={oldPassword}
                 onChange={(e) => setOldPassword(e.target.value)}
@@ -123,7 +132,8 @@ export default memo(function ChangePasswordScreen({ onClose }: Props): JSX.Eleme
               <label>新主密码</label>
               <input
                 type="password"
-                placeholder="至少 6 位"
+                aria-label="新主密码"
+                placeholder="至少 8 位" 
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
               />
@@ -133,6 +143,7 @@ export default memo(function ChangePasswordScreen({ onClose }: Props): JSX.Eleme
               <label>确认新主密码</label>
               <input
                 type="password"
+                aria-label="确认新主密码"
                 placeholder="再次输入新密码"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}

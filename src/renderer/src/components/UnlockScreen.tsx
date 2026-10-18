@@ -10,7 +10,7 @@
  *
  * 安全策略：
  *   - 首次设置时要求确认密码（防止输错导致无法解锁）
- *   - 密码最小长度 6 位
+ *   - 创建时主密码最小长度 8 位（解锁不拦截长度，避免旧密码进不去）
  *   - 首次使用时显示警告：主密码无法找回
  *   - 密码错误时显示错误提示，不清空输入框
  */
@@ -18,6 +18,23 @@
 import { useState, useEffect, useCallback, memo } from 'react'
 import { TriangleAlert } from 'lucide-react'
 import { vault } from '../api'
+import type { UnlockFailureReason } from '../api'
+
+/**
+ * 主密码最小长度
+ *
+ * PBKDF2 10 万次迭代能提高离线爆破成本，但 6 位纯数字只有 10^6 种组合，
+ * 8 位起步配合"建议混合字符"的提示，才能让迭代次数的意义真正落地。
+ * 注意：该限制仅在"创建保险库"时校验，解锁不做长度拦截。
+ */
+const MIN_MASTER_PASSWORD_LENGTH = 8
+
+/** 解锁失败原因 → 用户可见文案（文件损坏重试无用，提示用备份恢复） */
+const UNLOCK_ERROR_MESSAGE: Record<UnlockFailureReason, string> = {
+  missing: '未找到保险库文件，可能已被移动或删除',
+  'bad-password': '主密码错误',
+  corrupt: '保险库文件已损坏，无法解密。请用 vault.dat.bak-* 备份文件恢复后重试'
+}
 
 interface Props {
   onUnlocked: () => void  // 解锁成功后触发的回调（由父组件 App 切换界面）
@@ -56,8 +73,10 @@ export default memo(function UnlockScreen({ onUnlocked }: Props): JSX.Element {
       return
     }
 
-    if (masterPassword.length < 6) {
-      setError('主密码至少需要 6 位')
+    // 长度限制只对"创建"生效：解锁已有保险库时不能拦，
+    // 否则历史保险库若用了较短密码（或未来下调了限制）会永远进不去
+    if (!vaultExists && masterPassword.length < MIN_MASTER_PASSWORD_LENGTH) {
+      setError(`主密码至少需要 ${MIN_MASTER_PASSWORD_LENGTH} 位`)
       return
     }
 
@@ -72,9 +91,11 @@ export default memo(function UnlockScreen({ onUnlocked }: Props): JSX.Element {
     try {
       if (vaultExists) {
         // 场景 1：已有保险库，尝试解锁
-        const ok = await vault.unlock(masterPassword)
-        if (!ok) {
-          setError('主密码错误')  // GCM authTag 验证失败 = 密码错误
+        const result = await vault.unlock(masterPassword)
+        if (!result.ok) {
+          // 按主进程返回的原因给出可操作的提示：
+          // 密码错误 → 重试；文件损坏 → 重试无用，应引导用备份恢复
+          setError(UNLOCK_ERROR_MESSAGE[result.reason ?? 'bad-password'])
           setLoading(false)
           setShaking(true)
           setTimeout(() => setShaking(false), 400)
@@ -124,7 +145,8 @@ export default memo(function UnlockScreen({ onUnlocked }: Props): JSX.Element {
           {/* 主密码输入框 — letter-spacing 增加间距使密码更易辨认 */}
           <input
             type="password"
-            placeholder="主密码"
+            aria-label={vaultExists ? '主密码' : '设置主密码'}
+            placeholder={vaultExists ? '主密码' : '设置主密码（至少 8 位）'}
             value={masterPassword}
             onChange={(e) => setMasterPassword(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -135,6 +157,7 @@ export default memo(function UnlockScreen({ onUnlocked }: Props): JSX.Element {
           {!vaultExists && (
             <input
               type="password"
+              aria-label="确认主密码"
               placeholder="确认主密码"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
@@ -142,8 +165,13 @@ export default memo(function UnlockScreen({ onUnlocked }: Props): JSX.Element {
             />
           )}
 
+          {/* 强度建议 — 创建时提示，解锁时不打扰 */}
+          {!vaultExists && (
+            <p className="unlock-hint">建议 12 位以上，混合大小写字母、数字和符号</p>
+          )}
+
           {/* 错误提示 — 红色，位于按钮上方 */}
-          {error && <p className="unlock-error">{error}</p>}
+          {error && <p className="unlock-error" role="alert">{error}</p>}
 
           <button onClick={handleSubmit} disabled={loading}>
             {loading ? '处理中...' : vaultExists ? '解锁' : '创建保险库'}

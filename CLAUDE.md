@@ -12,17 +12,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run dev          # 开发模式（electron-vite dev → 启动 Electron）
 npm run build        # 仅构建（electron-vite build）
 npm start            # 从构建产物直接启动 Electron
-npm run pack         # 完整打包流程：生成图标 → 构建 → electron-builder --dir → 修补 exe 图标
-npm run dist         # 完整发布流程：生成图标 → 构建 → electron-builder（生成 portable exe）
-npm run icon         # 单独生成图标（scripts/make-icon.js → resources/icon.png + icon.ico）
+npm run pack         # 完整打包流程：生成图标 → 构建 → electron-builder --dir（afterPack 钩子内嵌图标）
+npm run dist         # 完整发布流程：生成图标 → 构建 → electron-builder（生成 portable exe，同样内嵌图标）
+npm run icon         # 单独生成图标（scripts/make-icon.js → resources/icon-*.png + icon.png + icon.ico + src/main/app-icon.ts）
+npm run icon:preview # 生成图标预览图（scripts/icon-preview.js → resources/preview-variants.png + preview-sizes.png）
+npm run typecheck    # 两个 tsconfig 各跑一遍 tsc --noEmit（需要 --composite false）
+npm test             # typecheck → build → 逻辑回归测试 → 渲染冒烟测试
+npm run test:logic   # 仅跑保险库逻辑回归（真实 Electron 运行时，13 项断言）
+npm run test:smoke   # 仅跑渲染冒烟（加载 out/renderer，检查 React 挂载、window.api、CSP、报错）
 ```
 
-项目没有测试框架或 lint 配置，也没有 typecheck 脚本。
+项目没有 lint 配置。测试是两个不依赖框架的脚本（`scripts/logic-test.js` / `scripts/smoke-test.js`），需要先 `npm run build`（smoke 读 `out/` 产物，logic 用 esbuild 现场打 bundle）。
 
-⚠️ **`npm run build` 不做类型检查**（electron-vite 用 Vite/esbuild 仅转译，不执行 `tsc`），构建通过不代表类型正确。需要类型检查时手动运行：
-`npx tsc --noEmit -p tsconfig.node.json --composite false`（主进程 + preload）
-`npx tsc --noEmit -p tsconfig.web.json --composite false`（渲染进程）
-（两个 tsconfig 均设置了 `composite: true`，需用 `--composite false` 覆盖才能配合 `--noEmit`）
+⚠️ **`npm run build` 不做类型检查**（electron-vite 用 Vite/esbuild 仅转译，不执行 `tsc`），构建通过不代表类型正确。这就是 `npm run typecheck` 存在的原因（两个 tsconfig 均 `composite: true`，需 `--composite false` 才能配 `--noEmit`）。
 
 ### 构建产物目录
 
@@ -30,8 +32,8 @@ npm run icon         # 单独生成图标（scripts/make-icon.js → resources/i
 |------|------|
 | `out/` | electron-vite 构建产物（主进程、preload、渲染进程） |
 | `dist/` | electron-builder 打包产物（portable exe） |
-| `resources/` | 程序化生成的图标文件（icon.png + icon.ico） |
-| `scripts/` | 构建辅助脚本（`make-icon.js` 生成图标 → PNG + ICO；`patch-icon.js` 用 rcedit 修补 exe 图标） |
+| `resources/` | 程序化生成的图标文件（`icon-{16,24,32,48,64,128,256}.png` + `icon.png` + `icon.ico`），以及 `icon:preview` 生成的预览图 |
+| `scripts/` | 构建辅助脚本：`icon-render.js` 矢量渲染器 → `make-icon.js` 产出 PNG/ICO/内嵌 base64 → `icon-preview.js` 出预览图 → `patch-icon.js` + `after-pack.js` 用 rcedit 把图标与版本信息写进 exe |
 
 ### UI 技术栈
 
@@ -74,7 +76,9 @@ VaultScreen 中通过 `keydown` 事件监听实现的全局快捷键：
 │ 主进程 (Main Process) — src/main/                       │
 │ Node.js 环境，可访问 fs/crypto/os 等 API                │
 │                                                         │
-│ index.ts    入口：创建窗口、注册 IPC、程序化生成图标     │
+│ index.ts    入口：创建窗口、注册 IPC、释放窗口图标       │
+│ app-icon.ts  图标 256px PNG 的 base64（由 npm run icon  │
+│              生成，勿手改）                              │
 │ ipc.ts      IPC 通道注册（handle 模式）                  │
 │ vault.ts    保险库状态管理（内存中解密后的条目 + CRUD）  │
 │ crypto.ts   AES-256-GCM 加解密、PBKDF2 密钥派生、       │
@@ -172,8 +176,20 @@ VaultScreen 中的闲置监控机制，细节对维护很重要：
 
 ### 文件存储路径
 
-- **生产模式**（`app.isPackaged`）：`vault.dat` 在 exe 同级目录（便携模式）
+- **便携版**（`PORTABLE_EXECUTABLE_DIR` 已设置）：`vault.dat` 在用户双击的那个 exe 同级目录
+- **打包模式其他情形**（如 `--dir` 产出的 win-unpacked）：`vault.dat` 在 exe 同级目录
 - **开发模式**：`vault.dat` 在 `app.getPath('userData')` 目录
+
+⚠️ **便携版必须优先读 `PORTABLE_EXECUTABLE_DIR`，不能用 `app.getPath('exe')`**：
+electron-builder 的 portable launcher 会把整个 app 解压到 `%TEMP%\<随机名>\` 再启动，
+退出后清理该目录。实测便携进程的 exe 路径是
+`C:\Users\<用户名>\AppData\Local\Temp\3KqhAztkwxeoFcDZjK395c5Rwbf\PassBox.exe`——
+若拿它当数据目录，`vault.dat` 会写进临时目录、关闭即丢。launcher 会额外注入
+`PORTABLE_EXECUTABLE_DIR` 指回真实位置，[store.ts](src/main/store.ts) 的
+`resolveDataDir()` 就是按这个优先级判断的（纯函数，`.tmp/store.cjs` 单测覆盖三种情况）。
+
+验证方式（无需键盘输入）：在 `dist\` 里放一个任意内容的 `vault.dat`，
+启动便携 exe——若显示「输入主密码解锁」而不是「首次使用」，说明它读的是 exe 同级目录。
 
 自动备份文件（`vault.dat.bak-时间戳`）与 `vault.dat` 存放在同一目录，滚动保留最近 5 份。
 
@@ -183,16 +199,63 @@ VaultScreen 中的闲置监控机制，细节对维护很重要：
 
 - 使用 `Menu.setApplicationMenu(null)` 隐藏菜单栏，使用系统原生标题栏
 - 窗口启动防闪烁采用三层防护：`show: false` + `backgroundColor: '#0a0a0f'` + `ready-to-show` 事件后才调用 `win.show()`
-- 窗口图标在 `ensureIcon()` 中程序化生成（64×64 像素，纯 Node.js 逐像素绘制盾牌+锁芯图案），同时保存到 `userData` 和 `resources` 目录
+- 窗口图标由 `ensureIcon()` 释放：把 [app-icon.ts](src/main/app-icon.ts) 里内嵌的 256px PNG（base64）写到 `userData/icon.png` 并返回路径给 `BrowserWindow`。**图标像素不再由代码逐像素生成**——统一走 `npm run icon` 的渲染管线，避免出现"运行时图标 / exe 图标"两套不一致的画法
 
 ### 构建配置
 
 - `electron.vite.config.ts`：主进程/preload 使用 `externalizeDepsPlugin`，渲染进程使用 `@vitejs/plugin-react`
 - TypeScript 三个 config：根 `tsconfig.json`（references）、`tsconfig.node.json`（主进程+preload）、`tsconfig.web.json`（渲染进程，`jsx: "react-jsx"`）
 - electron-builder 目标：Windows portable x64（单文件 exe，非安装器）。`package.json` 中保留有 NSIS 配置（允许选择安装目录、创建桌面快捷方式），但当前 portable 目标下该配置不生效
-- **签名坑**：`pack`/`dist` 脚本开头有 `set "CSC_IDENTITY_AUTO_DISCOVERY=false"` —— 本应用无签名证书，必须禁用 electron-builder 的自动签名发现。否则它会下载 winCodeSign 工具包，而 7-Zip 解压该包时需在 Windows 创建符号链接（darwin/macOS 二进制），无管理员权限/开发者模式时必然失败（"客户端没有所需的特权"）
-- 图标通过 `scripts/make-icon.js` 程序化生成（纯 Node.js PNG 编码器，无需 Canvas），然后 `scripts/patch-icon.js` 用 rcedit 修补 exe
+- **打包坑（winCodeSign / 符号链接）**：electron-builder 编辑 exe 资源时依赖 winCodeSign 工具包，其 7z 含 macOS 符号链接，在普通权限 Windows 上解包必然失败（`Cannot create symbolic link … 客户端没有所需的特权`），`pack`/`dist` 会直接中断。因此 [package.json](package.json) 里设了 `win.signAndEditExecutable: false` 彻底跳过该步骤，脚本开头的 `set "CSC_IDENTITY_AUTO_DISCOVERY=false"` 作为第二层保险保留
+- 图标与版本信息改由 `build.afterPack` 钩子（[after-pack.js](scripts/after-pack.js) → [patch-icon.js](scripts/patch-icon.js)）用 rcedit 写入。**必须用 afterPack 而不是打包后再补**：portable exe 是从打包目录复制生成的，事后修补只会改到 `dist/win-unpacked/` 里的中间文件，最终交付的 exe 仍是默认 Electron 图标
 
 ### UI 主题
 
 支持暗色/亮色主题切换，通过 CSS 自定义属性实现。主题选择存储在 `localStorage('theme')`，通过 `<html data-theme="...">` 属性驱动样式，重启后恢复上次选择；无记录时默认亮色（`getInitialTheme()` 从 localStorage 读取，兜底返回 `'light'`）。暗色主题使用 Matrix Green (`#00c853`) 配色，亮色主题使用相应调整后的绿色 (`#00a844`)。
+
+## 应用图标
+
+图标是矢量渲染出来的，不依赖 Canvas/ImageMagick，全套只有两个 Node 依赖（`png-to-ico`、`rcedit`）。
+
+**设计（当前默认方案 D「哑光墨绿」）**：纯色墨绿圆角方块（squircle，`#0e6b3c`）上放纯白盾牌，盾牌内是镂空钥匙孔（与底色同色，读作"挖穿"）。寓意"守卫 + 凭证"，与产品名 PassBox 一致；单色小尺寸下仍是"盾+孔"的可辨识剪影。
+
+⚠️ **不要再往底板加渐变/高光**：初版是"对角强渐变 + 14% 顶部白高光 + 18% 底部压暗 + 1px 白亮边"四层叠加，实测观感是塑料反光（"绿得油乎乎的"）。`flatTile()` 就是为此引入的：纯色 + 仅 ±1.5% 的竖向亮度差 + 同色系细边，得到亚光漆质感。
+
+**管线**：
+
+| 文件 | 作用 |
+|------|------|
+| [icon-render.js](scripts/icon-render.js) | 矢量渲染核心：SDF + 2×2 超采样抗锯齿、squircle 圆角、渐变/软阴影（仅旧方案用）、`flatTile()` 哑光底板；参数化 `shieldPoly()` 控制盾牌外形 |
+| [make-icon.js](scripts/make-icon.js) | 产出 7 个尺寸 PNG（16/24/32/48/64/128/256）→ `icon.ico`（多尺寸 ICO）→ `src/main/app-icon.ts`（256px base64，供主进程运行时用） |
+| [icon-preview.js](scripts/icon-preview.js) | 出 `preview-variants.png`（全部方案 × 亮/暗底）与 `preview-sizes.png`（各尺寸实际观感） |
+| [after-pack.js](scripts/after-pack.js) | electron-builder 打包钩子，把图标 + 版本信息写进 exe |
+
+**换造型**：[icon-render.js](scripts/icon-render.js) 底部 `VARIANTS` 定义六种造型——A 翡翠盾牌 / B 深墨盾牌 / C 翡翠挂锁（以上三个带渐变高光，旧版）、**D 哑光墨绿（默认）** / E 浅底绿盾 / F 哑光挂锁。`node scripts/make-icon.js E` 切换；盾牌胖瘦、钥匙孔位置由 `shieldPoly()` 的 `top/width/shoulder/tip/tCorner/tExp/wExp` 与 `keyholeSdf()` 的 `cy/r/stemR/stemEnd` 控制，改完跑 `node scripts/make-icon.js D && node scripts/icon-preview.js D` 直接看效果。
+
+⚠️ **不要手改** `src/main/app-icon.ts` 与 `resources/icon*.{png,ico}`，它们都是 `npm run icon` 的生成物，会被覆盖。
+
+## 代码审查与修复记录
+
+### 本轮已修复（2026-10）
+
+| 问题 | 修法 |
+|------|------|
+| 无 CSP、未开 sandbox | [index.html](src/renderer/src/index.html) 加 `Content-Security-Policy` meta（`default-src 'self'`，无 `unsafe-eval`，禁 object/frame/base-uri）；[index.ts](src/main/index.ts) 开 `sandbox: true`、显式 `contextIsolation: true` |
+| 无导航拦截 | 主进程注册 `will-navigate`（非自身页面一律 preventDefault + `shell.openExternal`）与 `setWindowOpenHandler`（一律 deny） |
+| 解锁失败原因不可区分 | `unlockVault()` 返回值由 `boolean` 改为 `{ ok, reason?: 'bad-password' \| 'corrupt' }`：GCM 认证失败 → `bad-password`，读写/JSON 解析失败 → `corrupt`。`changeMasterPassword()` 同理。失败分支补 `key.fill(0)` |
+| 删条目后新增 order 撞号 | `createEntry()` 的 order 由 `state.entries.length` 改为 `max(order)+1`（[vault.ts](src/main/vault.ts)） |
+| 可同时开多个实例 | 加 `app.requestSingleInstanceLock()` + `second-instance` 事件激活已有窗口（否则两个实例会并发写同一个 `vault.dat`） |
+| 主密码最短 6 位 | 统一提到 8 位：UnlockScreen（创建/解锁）、ChangePasswordScreen（改密码），文案同步"至少 8 位" |
+| 无障碍缺口 | Toast 补 `role="status" aria-live="polite"`；ConfirmDialog 补 `role="dialog" aria-modal aria-labelledby` + 焦点移入 + Tab 圈禁 + `stopImmediatePropagation`（顺带修掉 Esc 关对话框会连带清空选中条目）；密码框/搜索框补 `aria-label`；`focus-visible` 焦点环覆盖按钮/输入框/下拉 |
+| 无 typecheck / 测试 | 新增 `npm run typecheck`、`npm test`，以及 `scripts/logic-test.js`（真实 Electron 跑保险库生命周期，13 项断言）与 `scripts/smoke-test.js`（加载 `out/renderer` 检查 React 挂载、`window.api`、CSP、渲染报错） |
+
+### 仍遗留（按优先级）
+
+1. **备份文件不受主密码变更保护**：`vault.dat.bak-*` 是旧密文的副本，改主密码后旧密码仍能解开旧备份（[store.ts](src/main/store.ts)）。若威胁模型包含"旧密码泄露"，需在改密码时清理备份或提示用户
+2. **PBKDF2 迭代次数硬编码**（`crypto.ts` 的 `PBKDF2_ITERATIONS = 100_000`），且 `VaultData` 只有 `{salt,iv,authTag,ciphertext}` 没有版本/参数位——升级 KDF 参数时无法无损迁移旧库
+3. **IPC 入参未做 schema 校验**：`ipc.ts` 直接把渲染进程传来的对象写进条目。加一层校验能在误用时早失败（渲染进程被攻破时已无意义）
+4. **Toast 明暗两套色写死在 [App.css](src/renderer/src/App.css)**（1264-1276 / 1303-1317 行）与 5 处 `color:#fff`，新增主题要改两处
+5. **无响应式断点**（`@media` 0 处）：窗口可自由缩放，侧边栏固定 310px，窄窗口下主面板会被挤压
+6. **关窗丢弃未保存表单**：编辑中直接关窗会静默丢弃（未做 `beforeunload` 拦截）
+7. **`deleteVault()` 无人调用**：[store.ts](src/main/store.ts) 导出的"重置保险库"能力没有入口，属死代码/未完成功能
+8. **搜索不含备注字段**：只匹配 service / username / url

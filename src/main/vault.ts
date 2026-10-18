@@ -17,7 +17,11 @@
 import crypto from 'crypto'
 import { deriveKey, encrypt, decrypt } from './crypto'
 import { vaultExists, readVault, writeVault } from './store'
-import type { PasswordEntry } from '../shared/types'
+import type {
+  PasswordEntry,
+  UnlockResult,
+  ChangePasswordResult
+} from '../shared/types'
 
 /** 保险库文件的存储格式（保存在 vault.dat 中，全部为 hex 字符串） */
 interface VaultData {
@@ -87,38 +91,74 @@ export function createVault(masterPassword: string): void {
  *   4. 尝试解密 —— 解密成功 = 密码正确，解密失败（GCM authTag 不匹配）= 密码错误
  *   5. 如果成功，执行数据迁移（确保旧数据的 order 字段存在）
  *
+ * 失败原因必须区分清楚（见 UnlockFailureReason 注释）：
+ *   文件不存在 → 'missing'；文件结构损坏 → 'corrupt'；仅解密失败 → 'bad-password'。
+ *   这样界面才能给出正确指引，而不是一律提示"密码错误"。
+ *
  * @param masterPassword - 用户输入的主密码
- * @returns true 表示密码正确、解锁成功；false 表示密码错误或文件损坏
  */
-export function unlockVault(masterPassword: string): boolean {
-  if (!vaultExists()) return false
+export function unlockVault(masterPassword: string): UnlockResult {
+  if (!vaultExists()) return { ok: false, reason: 'missing' }
 
+  // ① 读取 + 解析文件结构：这一步失败说明文件本身损坏，与密码无关
+  let vaultData: VaultData
   try {
-    const raw = readVault()
-    const vaultData: VaultData = JSON.parse(raw)
-    const salt = Buffer.from(vaultData.salt, 'hex')
-    const key = deriveKey(masterPassword, salt)
-
-    // 尝试解密：AES-256-GCM 的 authTag 验证会自动检测密码错误
-    // 如果密码错误，authTag 不匹配，decrypt() 会抛出异常
-    const plaintext = decrypt(vaultData.ciphertext, key, vaultData.iv, vaultData.authTag)
-    const entries: PasswordEntry[] = JSON.parse(plaintext)
-
-    // 数据迁移：为旧版本（没有 order 字段的条目）补充 order
-    // 这是向后兼容措施，旧版本创建的保险库不会有 order 字段
-    entries.forEach((e, i) => {
-      if (e.order === undefined) e.order = i
-    })
-
-    state.isUnlocked = true
-    state.key = key
-    state.salt = vaultData.salt
-    state.entries = entries
-    return true
+    vaultData = JSON.parse(readVault())
   } catch {
-    // 任何异常（JSON 解析失败、解密失败等）都视为解锁失败
-    return false
+    return { ok: false, reason: 'corrupt' }
   }
+
+  // 字段完整性校验：缺字段 / 非 hex 字符串都算损坏，提前拦下，
+  // 避免把 Buffer.from(undefined, 'hex') 之类的异常误判成密码错误
+  const HEX_RE = /^[0-9a-f]+$/i
+  const saltHex = vaultData?.salt
+  const iv = vaultData?.iv
+  const authTag = vaultData?.authTag
+  const ciphertext = vaultData?.ciphertext
+  if (
+    typeof saltHex !== 'string' || !HEX_RE.test(saltHex) ||
+    typeof iv !== 'string' || !HEX_RE.test(iv) ||
+    typeof authTag !== 'string' || !HEX_RE.test(authTag) ||
+    typeof ciphertext !== 'string' || !HEX_RE.test(ciphertext)
+  ) {
+    return { ok: false, reason: 'corrupt' }
+  }
+
+  const salt = Buffer.from(saltHex, 'hex')
+  const key = deriveKey(masterPassword, salt)
+
+  // ② 解密：AES-256-GCM 的 authTag 验证会自动检测密码错误
+  //    如果密码错误，authTag 不匹配，decrypt() 会抛出异常
+  let plaintext: string
+  try {
+    plaintext = decrypt(ciphertext, key, iv, authTag)
+  } catch {
+    key.fill(0)  // 失败的密钥同样要清零，不留在内存里
+    return { ok: false, reason: 'bad-password' }
+  }
+
+  // ③ 明文解析：密钥正确但 JSON 坏掉，属于数据损坏
+  let entries: PasswordEntry[]
+  try {
+    const parsed = JSON.parse(plaintext)
+    if (!Array.isArray(parsed)) throw new Error('entries is not an array')
+    entries = parsed as PasswordEntry[]
+  } catch {
+    key.fill(0)
+    return { ok: false, reason: 'corrupt' }
+  }
+
+  // 数据迁移：为旧版本（没有 order 字段的条目）补充 order
+  // 这是向后兼容措施，旧版本创建的保险库不会有 order 字段
+  entries.forEach((e, i) => {
+    if (e.order === undefined) e.order = i
+  })
+
+  state.isUnlocked = true
+  state.key = key
+  state.salt = saltHex
+  state.entries = entries
+  return { ok: true }
 }
 
 /**
@@ -131,46 +171,58 @@ export function unlockVault(masterPassword: string): boolean {
  *   4. 重新加密当前内存中的条目列表
  *   5. 写入新 vaultData 覆盖文件
  *
+ * 失败原因区分：
+ *   旧密码错误 → 'bad-password'；旧密码正确但写盘失败 → 'write-failed'
+ *   （后者磁盘上仍是旧密码版本，界面必须如实告知，否则用户会以为密码已改。）
+ *
  * @param oldPassword - 当前主密码
  * @param newPassword - 新主密码
- * @returns true 表示修改成功；false 表示旧密码错误
  * @throws 如果保险库未解锁，抛出 Error
  */
-export function changeMasterPassword(oldPassword: string, newPassword: string): boolean {
+export function changeMasterPassword(oldPassword: string, newPassword: string): ChangePasswordResult {
   assertUnlocked()
 
+  // ① 读取 + 校验旧密码。这一段失败只可能是旧密码错误或文件损坏，
+  //    统一按旧密码错误处理（用户此时已解锁，文件损坏基本不可能）
+  let oldKey: Buffer | null = null
   try {
-    const raw = readVault()
-    const vaultData: VaultData = JSON.parse(raw)
+    const vaultData: VaultData = JSON.parse(readVault())
     const salt = Buffer.from(vaultData.salt, 'hex')
-
-    // 第一步：验证旧密码 —— 用旧密码派生密钥并尝试解密
-    const oldKey = deriveKey(oldPassword, salt)
+    oldKey = deriveKey(oldPassword, salt)
     decrypt(vaultData.ciphertext, oldKey, vaultData.iv, vaultData.authTag)
+  } catch {
+    oldKey?.fill(0)
+    return { ok: false, reason: 'bad-password' }
+  }
 
-    // 第二步：旧密码正确，用新密码重新加密
-    const newSalt = crypto.randomBytes(32)          // 生成新的随机盐
-    const newKey = deriveKey(newPassword, newSalt)  // 用新密码派生新密钥
+  // ② 旧密码正确，用新密码重新加密
+  const newSalt = crypto.randomBytes(32)          // 生成新的随机盐
+  const newKey = deriveKey(newPassword, newSalt)  // 用新密码派生新密钥
 
+  try {
     const plaintext = JSON.stringify(state.entries)
     const { iv, ciphertext, authTag } = encrypt(plaintext, newKey)
 
-    // 第三步：覆盖写入新的 vaultData
+    // ③ 覆盖写入新的 vaultData —— 写盘失败必须与密码错误区分开
     writeVault(JSON.stringify({
       salt: newSalt.toString('hex'),
       iv,
       authTag,
       ciphertext
     }))
-
-    // 更新内存中的密钥和 salt（先清零旧密钥缓冲区）
-    state.key?.fill(0)
-    state.key = newKey
-    state.salt = newSalt.toString('hex')
-    return true
-  } catch {
-    return false
+  } catch (err) {
+    newKey.fill(0)
+    console.error('[vault] 修改主密码时写入失败：', err)
+    return { ok: false, reason: 'write-failed' }
+  } finally {
+    oldKey?.fill(0)  // 旧密钥用完即清零
   }
+
+  // ④ 更新内存中的密钥和 salt（先清零旧密钥缓冲区）
+  state.key?.fill(0)
+  state.key = newKey
+  state.salt = newSalt.toString('hex')
+  return { ok: true }
 }
 
 /**
@@ -274,7 +326,10 @@ export function createEntry(entry: Omit<PasswordEntry, 'id' | 'order' | 'created
   const newEntry: PasswordEntry = {
     ...entry,
     id: crypto.randomUUID(),            // 生成 UUID v4
-    order: state.entries.length,        // 新条目排在最后
+    // 新条目排在最后：取当前最大 order + 1，而不是 entries.length。
+    // 用 length 会在删除过条目后与已有 order 撞号（[0,1,2] 删掉 1 后 length=2，
+    // 新条目 order 也是 2），排序结果因此不确定，拖拽排序会错乱。
+    order: state.entries.reduce((max, e) => (e.order > max ? e.order : max), -1) + 1,
     createdAt: now,
     updatedAt: now
   }

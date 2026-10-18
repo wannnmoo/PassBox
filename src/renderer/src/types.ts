@@ -10,5 +10,9 @@ export type {
   PasswordEntry,
   NewPasswordEntry,
   PasswordOptions,
-  VaultStatus
+  VaultStatus,
+  UnlockResult,
+  UnlockFailureReason,
+  ChangePasswordResult,
+  ChangePasswordFailureReason
 } from '../../shared/types'

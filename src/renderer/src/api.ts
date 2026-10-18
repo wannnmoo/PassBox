@@ -16,10 +16,28 @@
  *   await vault.lock()
  */
 
-import type { PasswordEntry, NewPasswordEntry, PasswordOptions, VaultStatus } from './types'
+import type {
+  PasswordEntry,
+  NewPasswordEntry,
+  PasswordOptions,
+  VaultStatus,
+  UnlockResult,
+  UnlockFailureReason,
+  ChangePasswordResult,
+  ChangePasswordFailureReason
+} from './types'
 
 // 重新导出类型，方便其他模块通过 './api' 一站式导入
-export type { PasswordEntry, NewPasswordEntry, PasswordOptions, VaultStatus }
+export type {
+  PasswordEntry,
+  NewPasswordEntry,
+  PasswordOptions,
+  VaultStatus,
+  UnlockResult,
+  UnlockFailureReason,
+  ChangePasswordResult,
+  ChangePasswordFailureReason
+}
 
 /** 获取 preload 脚本暴露的 API 对象引用 */
 const api = window.api
@@ -32,12 +50,12 @@ export const vault = {
   exists: (): Promise<boolean> => api.vault.exists(),
   /** 创建新保险库 */
   create: (masterPassword: string): Promise<void> => api.vault.create(masterPassword),
-  /** 解锁保险库（验证主密码） */
-  unlock: (masterPassword: string): Promise<boolean> => api.vault.unlock(masterPassword),
+  /** 解锁保险库（验证主密码）→ 成功与否 + 失败原因 */
+  unlock: (masterPassword: string): Promise<UnlockResult> => api.vault.unlock(masterPassword),
   /** 锁定保险库 */
   lock: (): Promise<void> => api.vault.lock(),
-  /** 修改主密码 */
-  changePassword: (oldPassword: string, newPassword: string): Promise<boolean> =>
+  /** 修改主密码 → 成功与否 + 失败原因 */
+  changePassword: (oldPassword: string, newPassword: string): Promise<ChangePasswordResult> =>
     api.vault.changePassword(oldPassword, newPassword),
   /** 获取保险库当前状态 */
   status: (): Promise<VaultStatus> => api.vault.status()

@@ -9,8 +9,13 @@
     "build": "electron-vite build",
     "start": "electron .",
     "icon": "node scripts/make-icon.js",
-    "pack": "set \"CSC_IDENTITY_AUTO_DISCOVERY=false\" && npm run icon && electron-vite build && electron-builder --dir && node scripts/patch-icon.js",
-    "dist": "set \"CSC_IDENTITY_AUTO_DISCOVERY=false\" && npm run icon && electron-vite build && electron-builder && node scripts/patch-icon.js"
+    "icon:preview": "node scripts/icon-preview.js",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false",
+    "test:logic": "electron scripts/logic-test.js",
+    "test:smoke": "electron scripts/smoke-test.js",
+    "test": "npm run typecheck && npm run build && electron scripts/logic-test.js && electron scripts/smoke-test.js",
+    "pack": "set \"CSC_IDENTITY_AUTO_DISCOVERY=false\" && npm run icon && electron-vite build && electron-builder --dir",
+    "dist": "set \"CSC_IDENTITY_AUTO_DISCOVERY=false\" && npm run icon && electron-vite build && electron-builder"
   },
   "build": {
     "appId": "com.passbox.app",
@@ -22,7 +27,9 @@
     "files": [
       "out/**/*"
     ],
+    "afterPack": "./scripts/after-pack.js",
     "win": {
+      "signAndEditExecutable": false,
       "target": [
         {
           "target": "portable",

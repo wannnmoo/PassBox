@@ -14,3 +14,6 @@ vault.dat.bak-*
 # Claude Code 会话数据（每次会话不同，不需要版本控制）
 .claude/sessions/
 .claude/worktrees/
+
+# 测试临时产物（scripts/logic-test.js 的 esbuild bundle）
+.tmp/

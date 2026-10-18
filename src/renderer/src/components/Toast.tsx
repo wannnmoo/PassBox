@@ -106,15 +106,19 @@ export const ToastProvider = memo(function ToastProvider({ children }: { childre
       {/* 子组件（应用内容） */}
       {children}
 
-      {/* Toast 通知容器 — 使用 fixed 定位，独立于文档流 */}
-      <div className="toast-container">
+      {/* Toast 通知容器 — 使用 fixed 定位，独立于文档流
+          role="status" + aria-live="polite"：屏幕阅读器会在不打断当前朗读的前提下
+          播报新出现的通知（成功/错误反馈不能只靠颜色和位置传达） */}
+      <div className="toast-container" role="status" aria-live="polite" aria-atomic="false">
         {toasts.map((toast) => (
           <div
             key={toast.id}
             className={`toast toast-${toast.type}`}  // 动态类名决定颜色
             onClick={() => handleRemove(toast.id)}     // 点击关闭
+            // 错误通知按 alert 语义播报，优先级高于普通状态提示
+            role={toast.type === 'error' ? 'alert' : undefined}
           >
-            <span className="toast-icon">{iconMap[toast.type]}</span>
+            <span className="toast-icon" aria-hidden="true">{iconMap[toast.type]}</span>
             <span className="toast-message">{toast.message}</span>
           </div>
         ))}
