@@ -122,29 +122,41 @@ app.whenReady().then(() => {
     // 指向临时目录（实测 C:\Users\...\Temp\3KqgoGeJbGjodwkTFRZripBBIYW\PassBox.exe），
     // 直接用它当数据目录会导致 vault.dat 关闭即丢。
     const store = require(join(root, '.tmp/store.cjs'))
-    const portable = store.resolveDataDir({
+    const portableWithVault = store.resolveDataDir({
       isPackaged: true,
       portableDir: 'D:\\Tools\\PassBox',
+      hasPortableVault: true,
       exePath: 'C:\\Users\\u\\AppData\\Local\\Temp\\3Kqgo\\PassBox.exe',
-      userDataDir: 'C:\\Users\\u\\AppData\\Roaming\\passbox'
+      userDataDir: 'C:\\Users\\u\\AppData\\Roaming\\PassBox'
     })
-    check('便携版优先用 PORTABLE_EXECUTABLE_DIR', portable === 'D:\\Tools\\PassBox', portable)
+    check('便携目录里已有 vault.dat → 数据跟着 exe 走', portableWithVault === 'D:\\Tools\\PassBox', portableWithVault)
 
-    const unpacked = store.resolveDataDir({
+    const portableEmpty = store.resolveDataDir({
+      isPackaged: true,
+      portableDir: 'D:\\Tools\\PassBox',
+      hasPortableVault: false,
+      exePath: 'C:\\Users\\u\\AppData\\Local\\Temp\\3Kqgo\\PassBox.exe',
+      userDataDir: 'C:\\Users\\u\\AppData\\Roaming\\PassBox'
+    })
+    check('便携目录没有库 → 用 userData（否则写进 %TEMP% 会丢）', portableEmpty === 'C:\\Users\\u\\AppData\\Roaming\\PassBox', portableEmpty)
+
+    const installed = store.resolveDataDir({
       isPackaged: true,
       portableDir: undefined,
-      exePath: 'D:\\PassBox\\dist\\win-unpacked\\PassBox.exe',
-      userDataDir: 'C:\\Users\\u\\AppData\\Roaming\\passbox'
+      hasPortableVault: false,
+      exePath: 'C:\\Program Files\\PassBox\\PassBox.exe',
+      userDataDir: 'C:\\Users\\u\\AppData\\Roaming\\PassBox'
     })
-    check('无该变量时回退到 exe 同级', unpacked === 'D:\\PassBox\\dist\\win-unpacked', unpacked)
+    check('安装版不会写 Program Files，改用 userData', installed === 'C:\\Users\\u\\AppData\\Roaming\\PassBox', installed)
 
     const dev = store.resolveDataDir({
       isPackaged: false,
       portableDir: undefined,
+      hasPortableVault: false,
       exePath: 'D:\\PassBox\\node_modules\\electron\\dist\\electron.exe',
       userDataDir: 'C:\\Users\\u\\AppData\\Roaming\\passbox'
     })
-    check('开发模式用 userData', dev === 'C:\\Users\\u\\AppData\\Roaming\\passbox', dev)
+    check('开发模式用 userData（与安装版同目录）', dev === 'C:\\Users\\u\\AppData\\Roaming\\passbox', dev)
   } catch (err) {
     check('测试执行未抛异常', false, err && err.message)
   } finally {

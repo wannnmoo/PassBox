@@ -40,14 +40,16 @@ PassBox 是一个基于 Electron + React + TypeScript 的桌面密码管理器�
 
 ## 📷 截图
 
-（待补充截图）
+![解锁界面](docs/screenshot-unlock.png)
+
+> 解锁界面（亮色主题）。深色主题可在右上角 ☀/🌙 切换。
 
 ## 🚀 快速开始
 
 ### 环境要求
 
 - Node.js ≥ 18
-- Windows（当前打包目标为 Windows x64 portable）
+- Windows（打包目标为 Windows x64，同时产出 NSIS 安装包与便携版）
 
 ### 开发模式
 
@@ -59,24 +61,29 @@ npm run dev        # 启动开发模式（HMR 热更新）
 ### 打包发布
 
 ```bash
-npm run typecheck  # 类型检查（npm run build 本身不做类型检查）
-npm test           # 类型检查 + 构建 + 逻辑回归（13 项）+ 渲染冒烟
-npm run build      # 仅构建（不打包）
-npm run pack       # 打包为解压目录（调试用）
-npm run dist       # 打包为单文件 portable exe
+npm run typecheck      # 类型检查（npm run build 本身不做类型检查）
+npm test               # 类型检查 + 构建 + 逻辑回归（17 项）+ 渲染冒烟
+npm run build          # 仅构建（不打包）
+npm run pack           # 打包为解压目录（调试用，不产安装包）
+npm run dist           # 同时产出「安装包 + 便携版」
+npm run dist:installer # 只出安装包：dist/PassBox Setup <version>.exe
+npm run dist:portable  # 只出便携版：dist/PassBox <version>.exe
 ```
 
-构建产物在 `dist/` 目录，双击即可运行，无需安装。
+产物在 `dist/` 目录：安装包双击可装（可选目录、建桌面快捷方式），便携版双击即运行、无需安装。
 
 ## 📁 数据存储位置
 
 | 模式 | 位置 |
 |------|------|
-| **生产模式**（打包 exe） | 与用户双击的 exe 同目录（便携模式） |
-| **开发模式**（`npm run dev`） | `C:\Users\<用户名>\AppData\Roaming\passbox\` |
+| **安装版** | `C:\Users\<用户名>\AppData\Roaming\PassBox\` |
+| **便携版，且 exe 旁边已有 `vault.dat`** | 就在 exe 同目录（U 盘即插即用） |
+| **便携版，但 exe 旁边还没有库** | `C:\Users\<用户名>\AppData\Roaming\PassBox\`（不会凭空造库，先复用已有数据） |
+| **开发模式**（`npm run dev`） | `C:\Users\<用户名>\AppData\Roaming\passbox\`（同一目录，大小写不敏感） |
 
 > 便携版 exe 运行时会被解压到 `%TEMP%\` 临时目录，程序读取的是你放置 exe 的真实目录
 > （通过 `PORTABLE_EXECUTABLE_DIR` 得到），所以把 exe 放进 U 盘、桌面都能正常读写同目录数据。
+> 首次想在 U 盘上建立独立库时，把已有 `vault.dat` 复制到 U 盘的 exe 旁边即可。
 
 - **保险库文件**：`vault.dat`（加密数据）
 - **自动备份**：`vault.dat.bak-<时间戳>`（与 vault.dat 同目录，滚动保留最近 5 份）
@@ -97,7 +104,7 @@ npm run dist       # 打包为单文件 portable exe
 - **React 18** + **TypeScript** — 渲染层，无外部状态管理库
 - **electron-vite** — 构建工具
 - **lucide-react** — 图标库（唯一运行时依赖）
-- **electron-builder** — 打包（Windows portable x64）
+- **electron-builder** — 打包（Windows x64：NSIS 安装包 + 便携版）
 - **图标** — 纯 Node.js 矢量渲染（无 Canvas/ImageMagick）：`npm run icon` 一次生成 7 个尺寸 PNG + 多尺寸 ICO + 运行时内嵌 PNG，窗口 / 任务栏 / exe 三处同源；哑光扁平造型，`node scripts/make-icon.js D|E|F` 换方案
 
 ## 📂 项目结构

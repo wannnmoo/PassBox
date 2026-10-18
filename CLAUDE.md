@@ -13,12 +13,14 @@ npm run dev          # 开发模式（electron-vite dev → 启动 Electron）
 npm run build        # 仅构建（electron-vite build）
 npm start            # 从构建产物直接启动 Electron
 npm run pack         # 完整打包流程：生成图标 → 构建 → electron-builder --dir（afterPack 钩子内嵌图标）
-npm run dist         # 完整发布流程：生成图标 → 构建 → electron-builder（生成 portable exe，同样内嵌图标）
+npm run dist         # 完整发布流程：生成图标 → 构建 → 同时产出「安装包 + 便携版」
+npm run dist:installer  # 只出 NSIS 安装包（dist/PassBox Setup <version>.exe）
+npm run dist:portable   # 只出便携版（dist/PassBox <version>.exe）
 npm run icon         # 单独生成图标（scripts/make-icon.js → resources/icon-*.png + icon.png + icon.ico + src/main/app-icon.ts）
 npm run icon:preview # 生成图标预览图（scripts/icon-preview.js → resources/preview-variants.png + preview-sizes.png）
 npm run typecheck    # 两个 tsconfig 各跑一遍 tsc --noEmit（需要 --composite false）
 npm test             # typecheck → build → 逻辑回归测试 → 渲染冒烟测试
-npm run test:logic   # 仅跑保险库逻辑回归（真实 Electron 运行时，13 项断言）
+npm run test:logic   # 仅跑保险库逻辑回归（真实 Electron 运行时，17 项断言）
 npm run test:smoke   # 仅跑渲染冒烟（加载 out/renderer，检查 React 挂载、window.api、CSP、报错）
 ```
 
@@ -31,7 +33,7 @@ npm run test:smoke   # 仅跑渲染冒烟（加载 out/renderer，检查 React �
 | 目录 | 用途 |
 |------|------|
 | `out/` | electron-vite 构建产物（主进程、preload、渲染进程） |
-| `dist/` | electron-builder 打包产物（portable exe） |
+| `dist/` | electron-builder 打包产物：`PassBox Setup <ver>.exe`（NSIS 安装包）、`PassBox <ver>.exe`（便携版）、`win-unpacked/`（未打包目录，调试用） |
 | `resources/` | 程序化生成的图标文件（`icon-{16,24,32,48,64,128,256}.png` + `icon.png` + `icon.ico`），以及 `icon:preview` 生成的预览图 |
 | `scripts/` | 构建辅助脚本：`icon-render.js` 矢量渲染器 → `make-icon.js` 产出 PNG/ICO/内嵌 base64 → `icon-preview.js` 出预览图 → `patch-icon.js` + `after-pack.js` 用 rcedit 把图标与版本信息写进 exe |
 
@@ -176,20 +178,32 @@ VaultScreen 中的闲置监控机制，细节对维护很重要：
 
 ### 文件存储路径
 
-- **便携版**（`PORTABLE_EXECUTABLE_DIR` 已设置）：`vault.dat` 在用户双击的那个 exe 同级目录
-- **打包模式其他情形**（如 `--dir` 产出的 win-unpacked）：`vault.dat` 在 exe 同级目录
-- **开发模式**：`vault.dat` 在 `app.getPath('userData')` 目录
+| 场景 | `vault.dat` 位置 |
+|------|------------------|
+| **安装版**（NSIS，装到 `C:\Program Files` 或用户目录） | `%APPDATA%\PassBox\vault.dat` |
+| **便携版但 exe 旁边还没有库** | 同上（`%APPDATA%\PassBox`）——这样开发模式建的库，便携版也能直接看到 |
+| **便携版且 exe 旁边已有 `vault.dat`** | 就在 exe 同级目录（数据跟着 exe 走，可放 U 盘） |
+| **开发模式**（`npm run dev` / `npm start`） | `%APPDATA%\passbox\vault.dat`（Windows 路径大小写不敏感，与上面同一个目录） |
 
-⚠️ **便携版必须优先读 `PORTABLE_EXECUTABLE_DIR`，不能用 `app.getPath('exe')`**：
-electron-builder 的 portable launcher 会把整个 app 解压到 `%TEMP%\<随机名>\` 再启动，
-退出后清理该目录。实测便携进程的 exe 路径是
-`C:\Users\<用户名>\AppData\Local\Temp\3KqhAztkwxeoFcDZjK395c5Rwbf\PassBox.exe`——
-若拿它当数据目录，`vault.dat` 会写进临时目录、关闭即丢。launcher 会额外注入
-`PORTABLE_EXECUTABLE_DIR` 指回真实位置，[store.ts](src/main/store.ts) 的
-`resolveDataDir()` 就是按这个优先级判断的（纯函数，`.tmp/store.cjs` 单测覆盖三种情况）。
+判定逻辑在 [store.ts](src/main/store.ts) 的纯函数 `resolveDataDir()` 里（由 `.tmp/store.cjs` 单测覆盖 4 种情况）：
 
-验证方式（无需键盘输入）：在 `dist\` 里放一个任意内容的 `vault.dat`，
-启动便携 exe——若显示「输入主密码解锁」而不是「首次使用」，说明它读的是 exe 同级目录。
+```
+!isPackaged                      → userData
+portableDir 且该目录已有 vault.dat → portableDir
+其余                             → userData
+```
+
+⚠️ **两个已踩过的坑，改这里前务必读**：
+
+1. **不能用 `app.getPath('exe')` 当数据目录**：便携版 launcher 会把整个 app 解压到
+   `%TEMP%\<随机名>\` 再启动、退出即清理，实测便携进程的 exe 路径是
+   `C:\Users\<用户名>\AppData\Local\Temp\3KqhAztkwxeoFcDZjK395c5Rwbf\PassBox.exe`，
+   写进去的 `vault.dat` 关闭即丢。便携版要用 launcher 注入的 `PORTABLE_EXECUTABLE_DIR`。
+2. **安装版也不能回退到 exe 同级目录**：装在 `Program Files` 下普通用户无写权限。
+   所以「安装版 + 便携无库」统一落到 `userData`。
+
+验证方式（不需要键盘输入）：把该目录清空/放入一个任意内容的 `vault.dat` 后启动打包产物——
+显示「输入主密码解锁」说明读到了库，「首次使用，请设置主密码」说明没读到。
 
 自动备份文件（`vault.dat.bak-时间戳`）与 `vault.dat` 存放在同一目录，滚动保留最近 5 份。
 
@@ -205,7 +219,7 @@ electron-builder 的 portable launcher 会把整个 app 解压到 `%TEMP%\<随�
 
 - `electron.vite.config.ts`：主进程/preload 使用 `externalizeDepsPlugin`，渲染进程使用 `@vitejs/plugin-react`
 - TypeScript 三个 config：根 `tsconfig.json`（references）、`tsconfig.node.json`（主进程+preload）、`tsconfig.web.json`（渲染进程，`jsx: "react-jsx"`）
-- electron-builder 目标：Windows portable x64（单文件 exe，非安装器）。`package.json` 中保留有 NSIS 配置（允许选择安装目录、创建桌面快捷方式），但当前 portable 目标下该配置不生效
+- electron-builder 目标：Windows x64，同时产出 **NSIS 安装包**（`dist/PassBox Setup <version>.exe`）与 **便携版**（`dist/PassBox <version>.exe`）。NSIS 允许选择安装目录、创建桌面快捷方式；安装版数据固定落在 `%APPDATA%\PassBox`（装到 `Program Files` 时 exe 同级目录不可写，见「文件存储路径」）
 - **打包坑（winCodeSign / 符号链接）**：electron-builder 编辑 exe 资源时依赖 winCodeSign 工具包，其 7z 含 macOS 符号链接，在普通权限 Windows 上解包必然失败（`Cannot create symbolic link … 客户端没有所需的特权`），`pack`/`dist` 会直接中断。因此 [package.json](package.json) 里设了 `win.signAndEditExecutable: false` 彻底跳过该步骤，脚本开头的 `set "CSC_IDENTITY_AUTO_DISCOVERY=false"` 作为第二层保险保留
 - 图标与版本信息改由 `build.afterPack` 钩子（[after-pack.js](scripts/after-pack.js) → [patch-icon.js](scripts/patch-icon.js)）用 rcedit 写入。**必须用 afterPack 而不是打包后再补**：portable exe 是从打包目录复制生成的，事后修补只会改到 `dist/win-unpacked/` 里的中间文件，最终交付的 exe 仍是默认 Electron 图标
 
@@ -247,15 +261,16 @@ electron-builder 的 portable launcher 会把整个 app 解压到 `%TEMP%\<随�
 | 可同时开多个实例 | 加 `app.requestSingleInstanceLock()` + `second-instance` 事件激活已有窗口（否则两个实例会并发写同一个 `vault.dat`） |
 | 主密码最短 6 位 | 统一提到 8 位：UnlockScreen（创建/解锁）、ChangePasswordScreen（改密码），文案同步"至少 8 位" |
 | 无障碍缺口 | Toast 补 `role="status" aria-live="polite"`；ConfirmDialog 补 `role="dialog" aria-modal aria-labelledby` + 焦点移入 + Tab 圈禁 + `stopImmediatePropagation`（顺带修掉 Esc 关对话框会连带清空选中条目）；密码框/搜索框补 `aria-label`；`focus-visible` 焦点环覆盖按钮/输入框/下拉 |
-| 无 typecheck / 测试 | 新增 `npm run typecheck`、`npm test`，以及 `scripts/logic-test.js`（真实 Electron 跑保险库生命周期，13 项断言）与 `scripts/smoke-test.js`（加载 `out/renderer` 检查 React 挂载、`window.api`、CSP、渲染报错） |
+| 无 typecheck / 测试 | 新增 `npm run typecheck`、`npm test`，以及 `scripts/logic-test.js`（真实 Electron 跑保险库生命周期 + 数据目录解析，17 项断言）与 `scripts/smoke-test.js`（加载 `out/renderer` 检查 React 挂载、`window.api`、CSP、渲染报错） |
+| 便携版数据写进 %TEMP% 即丢 | 数据目录改由纯函数 `resolveDataDir()` 决定（见「文件存储路径」），便携版读 `PORTABLE_EXECUTABLE_DIR` |
+| Toast 明暗两套色硬编码 | 抽出 `--toast-{success,error,info}-{bg,border,text}` 与 `--text-on-accent` 变量，删除重复的 `[data-theme='light'] .toast-*` 覆盖块 |
 
 ### 仍遗留（按优先级）
 
 1. **备份文件不受主密码变更保护**：`vault.dat.bak-*` 是旧密文的副本，改主密码后旧密码仍能解开旧备份（[store.ts](src/main/store.ts)）。若威胁模型包含"旧密码泄露"，需在改密码时清理备份或提示用户
 2. **PBKDF2 迭代次数硬编码**（`crypto.ts` 的 `PBKDF2_ITERATIONS = 100_000`），且 `VaultData` 只有 `{salt,iv,authTag,ciphertext}` 没有版本/参数位——升级 KDF 参数时无法无损迁移旧库
 3. **IPC 入参未做 schema 校验**：`ipc.ts` 直接把渲染进程传来的对象写进条目。加一层校验能在误用时早失败（渲染进程被攻破时已无意义）
-4. **Toast 明暗两套色写死在 [App.css](src/renderer/src/App.css)**（1264-1276 / 1303-1317 行）与 5 处 `color:#fff`，新增主题要改两处
-5. **无响应式断点**（`@media` 0 处）：窗口可自由缩放，侧边栏固定 310px，窄窗口下主面板会被挤压
-6. **关窗丢弃未保存表单**：编辑中直接关窗会静默丢弃（未做 `beforeunload` 拦截）
-7. **`deleteVault()` 无人调用**：[store.ts](src/main/store.ts) 导出的"重置保险库"能力没有入口，属死代码/未完成功能
-8. **搜索不含备注字段**：只匹配 service / username / url
+4. **无响应式断点**（`@media` 0 处）：窗口可自由缩放（最小 720×520），侧边栏固定 310px，窄窗口下主面板会被挤压
+5. **关窗丢弃未保存表单**：编辑中直接关窗会静默丢弃（未做 `beforeunload` 拦截）
+6. **`deleteVault()` 无人调用**：[store.ts](src/main/store.ts) 导出的"重置保险库"能力没有入口，属死代码/未完成功能
+7. **搜索不含备注字段**：只匹配 service / username / url

@@ -23,38 +23,49 @@ import path from 'path'
  * 纯函数：决定保险库数据目录（抽出来是为了能脱离 Electron 单测）
  *
  * 优先级：
- *   1. 便携版 launcher 注入的 PORTABLE_EXECUTABLE_DIR（用户双击 exe 的真实目录）
- *   2. 打包模式回退：exe 同级目录（`--dir` 打出来的 win-unpacked 走这条）
- *   3. 开发模式：userData 目录
+ *   1. 便携版 launcher 注入的 PORTABLE_EXECUTABLE_DIR **且该目录已有 vault.dat**
+ *      → 这是用户主动把库放在 exe 旁边的便携用法
+ *   2. 其余打包情形（NSIS 安装版 / 便携版但旁边还没有库）→ userData 目录
+ *   3. 开发模式 → userData 目录
+ *
+ * ⚠️ 为什么第 2 条不能回退到 exe 同级目录：
+ *   - NSIS 装到 `C:\Program Files\` 时普通用户对该目录没有写权限，写入必失败；
+ *   - 便携版 launcher 会把 app 解压到 `%TEMP%\<随机名>\` 再运行，退出即清理，
+ *     `app.getPath('exe')` 指向临时目录，写进去的 vault.dat 会随退出消失。
+ *   统一用 userData 也保证了「开发模式建好的库，安装版能直接看到」——
+ *   两者都是 `%APPDATA%\PassBox\vault.dat`（Windows 路径大小写不敏感）。
  */
 export function resolveDataDir(opts: {
   isPackaged: boolean
   portableDir?: string | undefined
+  /** 便携目录里是否已经存在 vault.dat（由调用方用 fs 探测后传入） */
+  hasPortableVault?: boolean | undefined
   exePath: string
   userDataDir: string
 }): string {
   if (!opts.isPackaged) return opts.userDataDir
-  if (opts.portableDir) return opts.portableDir
-  return path.dirname(opts.exePath)
+  if (opts.portableDir && opts.hasPortableVault) return opts.portableDir
+  return opts.userDataDir
 }
 
 /**
  * 获取保险库文件的完整路径
  *
- * ⚠️ 便携版为什么必须先看 PORTABLE_EXECUTABLE_DIR：
- * electron-builder 的 portable launcher 会把 app 解压到 `%TEMP%\<随机名>\` 再运行，
- * 退出后清理该目录。所以 app.getPath('exe') 指向的是那个临时目录，
- * 直接拿它当数据目录 → vault.dat 写进临时目录 → 关闭即丢（实测临时路径形如
- * `C:\Users\<用户名>\AppData\Local\Temp\3KqgoGeJbGjodwkTFRZripBBIYW\PassBox.exe`）。
- * launcher 会额外注入 PORTABLE_EXECUTABLE_DIR 指回用户双击 exe 的真实位置。
+ * 关于便携版的坑（已实测）：electron-builder 的 portable launcher 会把整个 app
+ * 解压到 `%TEMP%\<随机名>\` 再启动，退出后清理该目录，因此 `app.getPath('exe')`
+ * 指向的是临时路径（实测形如
+ * `C:\Users\<用户名>\AppData\Local\Temp\3KqhAztkwxeoFcDZjK395c5Rwbf\PassBox.exe`）。
+ * launcher 会额外注入 `PORTABLE_EXECUTABLE_DIR` 指回用户双击 exe 的真实位置。
  *
  * @returns vault.dat 的绝对路径
  */
 function vaultPath(): string {
+  const portableDir = process.env.PORTABLE_EXECUTABLE_DIR
   return path.join(
     resolveDataDir({
       isPackaged: app.isPackaged,
-      portableDir: process.env.PORTABLE_EXECUTABLE_DIR,
+      portableDir,
+      hasPortableVault: portableDir ? fs.existsSync(path.join(portableDir, 'vault.dat')) : false,
       exePath: app.getPath('exe'),
       userDataDir: app.getPath('userData')
     }),
